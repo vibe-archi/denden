@@ -504,16 +504,26 @@ fn cmd_create(pos: &[String], opts: &Opts) {
     }
 }
 
-/// Waits until this machine is admitted to `label` (a member let it in), up to `secs`.
-fn wait_admission(label: &str, secs: u64) -> bool {
+/// Waits until this machine is admitted to `label` (a member let it in), up to `secs`. Err: why
+/// not yet, as far as this machine can tell.
+fn wait_admission(label: &str, secs: u64) -> Result<(), String> {
     let t0 = Instant::now();
     loop {
         let st = call("GET", &q("/status", &[("label", label)]), None, 10000);
-        if truthy(st["channel"].get("member")) {
-            return true;
+        let c = &st["channel"];
+        if truthy(c.get("member")) {
+            return Ok(());
         }
         if t0.elapsed() > Duration::from_secs(secs) {
-            return false;
+            return Err(match c.get("refused").and_then(Value::as_str) {
+                Some("not-trusted") => format!("A machine of {label} refused this one: the invitation was already used or has expired · ask for a new one (/denden:im invite on a machine of the channel), then run this join again"),
+                Some("blocked") => format!("A machine of {label} has blocked this one"),
+                _ if vu(c, "online") == 0 => format!(
+                    "No machine of {label} reached yet{}: the inviting machine must be online, and both networks must let denden through (UDP) · this machine keeps trying in the background: run this join again in a minute",
+                    if truthy(c.get("announced")) { "" } else { " (this machine is still announcing itself on the network)" }
+                ),
+                _ => format!("Connected to {label}, waiting for the certificate of the inviting machine · run this join again in a moment"),
+            });
         }
         sleep_ms(500);
     }
@@ -543,8 +553,8 @@ fn cmd_join(pos: &[String], opts: &Opts) {
     let r = call("POST", "/attach", Some(&body), 20000);
     let Some(r) = handle_attach(r, &h, &label, flag(opts, "move")) else { return deny_rule_note(&h) };
     if vs(&r, "need") == "admission" {
-        if !wait_admission(&label, 25) {
-            fail(&format!("This machine is waiting to be admitted to {label}: the machine that invited it must be online · try again in a moment"));
+        if let Err(why) = wait_admission(&label, 45) {
+            fail(&why);
         }
     } else {
         // Not in the channel yet: the invitation code, on a local page (never in the conversation).
@@ -577,8 +587,8 @@ fn cmd_join(pos: &[String], opts: &Opts) {
             }
             Err(_) => fail(&format!("The page closed without an invitation code · run /denden:im join {label} again when you have it")),
         }
-        if !wait_admission(&label, 30) {
-            fail(&format!("This machine is waiting to be admitted to {label}: the machine that invited it must be online"));
+        if let Err(why) = wait_admission(&label, 45) {
+            fail(&why);
         }
     }
     let r = call("POST", "/attach", Some(&body), 20000);
@@ -601,10 +611,9 @@ fn terminal_join(label: &str) {
         Ok(j) if truthy(j.get("already")) => println!("This machine is already in this channel (here: {}).", vs(&j, "label")),
         Ok(j) => {
             println!("Joining {label}, invited by {} [{}]...", vs(&j, "inviter"), vs(&j, "inviterFp"));
-            if wait_admission(label, 30) {
-                println!("{} joined {label}. Attach a conversation with /denden:im join {label} as <name>.", machine_name());
-            } else {
-                println!("{} is waiting to be admitted to {label}: the machine that invited it must be online.", machine_name());
+            match wait_admission(label, 45) {
+                Ok(()) => println!("{} joined {label}. Attach a conversation with /denden:im join {label} as <name>.", machine_name()),
+                Err(why) => println!("{why}"),
             }
         }
         Err(e) => {

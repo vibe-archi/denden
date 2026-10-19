@@ -74,6 +74,8 @@ pub struct Chan {
     /// Transport keys that refused us (not admitted yet), per epoch: dialled again once we are.
     pub refused_by: HashMap<String, u64>,
     pub buckets: HashMap<String, (f64, u64)>,
+    /// The last refusal we got, and when: shown while this machine waits to be admitted.
+    pub last_refusal: Option<(String, u64)>,
 }
 
 pub struct Watcher {
@@ -617,7 +619,7 @@ fn start_channel(shared: &Shared, ch: Channel) {
     let cid = ch.cid.clone();
     {
         let mut st = shared.lock().unwrap();
-        st.chans.insert(cid.clone(), Chan { ch, swarms: BTreeMap::new(), announced: false, peers: HashMap::new(), banned_t: HashSet::new(), refused_by: HashMap::new(), buckets: HashMap::new() });
+        st.chans.insert(cid.clone(), Chan { ch, swarms: BTreeMap::new(), announced: false, peers: HashMap::new(), banned_t: HashSet::new(), refused_by: HashMap::new(), buckets: HashMap::new(), last_refusal: None });
     }
     net::reconcile(shared);
 }
@@ -1137,7 +1139,7 @@ async fn handle_api(shared: Shared, stream: tokio::net::TcpStream, token: String
                 v["conv"] = conv_status(&st, conv);
             }
             if let Some(label) = req.q("label") {
-                v["channel"] = st.chan_by_label(label).map(|c| json!({ "label": c.ch.label(), "member": c.ch.is_member(), "online": c.peers.len() })).unwrap_or(Value::Null);
+                v["channel"] = st.chan_by_label(label).map(|c| json!({ "label": c.ch.label(), "member": c.ch.is_member(), "online": c.peers.len(), "announced": c.announced, "refused": c.last_refusal.as_ref().filter(|(_, at)| now_ms().saturating_sub(*at) < 120_000).map(|(e, _)| e.clone()) })).unwrap_or(Value::Null);
             }
             reply(v)
         }
@@ -1272,7 +1274,12 @@ pub async fn shutdown(shared: Shared) {
 /// Every 30 seconds: stop when nobody here could read what arrives.
 fn idle_check(shared: &Shared) -> bool {
     let st = shared.lock().unwrap();
-    !st.keepalive && st.watchers.is_empty() && st.presence == 0 && now_ms().saturating_sub(st.last_active) > IDLE_STOP
+    let now = now_ms();
+    // Attached conversations keep it up (design decision 27), and so does an invitation not used
+    // yet: the new machine is admitted by this one, which must be online when it comes.
+    let attached = st.convs.attached().any(|c| st.chans.contains_key(&c.cid));
+    let inviting = st.chans.values().any(|c| c.ch.cfg.get("invites").and_then(Value::as_array).is_some_and(|a| a.iter().any(|i| u(i, "exp") > now)));
+    !st.keepalive && !attached && !inviting && st.watchers.is_empty() && st.presence == 0 && now.saturating_sub(st.last_active) > IDLE_STOP
 }
 
 /// Hourly: history older than 30 days, and messages undelivered for 7 days.

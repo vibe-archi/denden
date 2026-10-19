@@ -283,6 +283,7 @@ fn on_refused(st: &mut State, conn: u64, f: &Value) {
     let err = f.get("error").map(js_string).unwrap_or_default();
     if let Some(c) = st.chans.get_mut(&cid) {
         c.refused_by.insert(tpub.clone(), epoch);
+        c.last_refusal = Some((err.clone(), now_ms()));
         let why = match err.as_str() {
             "not-trusted" => "has not admitted us yet (an invitation or a certificate is needed)",
             "blocked" => "has blocked this machine",
