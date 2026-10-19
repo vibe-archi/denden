@@ -221,7 +221,8 @@ fn item(c: &Chan, m: &Value, now: u64) -> Value {
     let kind = if s(m, "dir") == "note" { "note" } else { "msg" };
     let mut v = json!({
         "seq": m.get("seq"), "id": m.get("id"), "kind": kind, "text": m.get("text"),
-        "at": m.get("at"), "ago": crate::time::ago(now, u(m, "at")),
+        // How long ago it was first sent: the time it waited at the sender counts too.
+        "at": m.get("at"), "ago": crate::time::ago(now, u(m, "at").saturating_sub(u(m, "waited"))),
     });
     if kind == "msg" {
         v["from"] = json!(s(m, "from"));

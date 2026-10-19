@@ -331,10 +331,18 @@ impl Names {
 /// without the user's go-ahead, since what it asks may no longer apply.
 pub const LATE_AFTER: u64 = 3600 * 1000;
 
+/// LATE_AFTER, or DENDEN_LATE_AFTER_SECONDS (tests only, like DENDEN_EPOCH_SECONDS).
+pub fn late_after() -> u64 {
+    static LATE: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    *LATE.get_or_init(|| {
+        std::env::var("DENDEN_LATE_AFTER_SECONDS").ok().and_then(|s| s.trim().parse::<u64>().ok()).filter(|s| *s > 0).map(|s| s * 1000).unwrap_or(LATE_AFTER)
+    })
+}
+
 /// `waited`: what the sender reports it held the message; then the time it sat here before a
 /// conversation got it. Each side measures with its own clock.
 pub fn is_late(waited: u64, received_at: u64, handed_at: u64) -> bool {
-    waited.saturating_add(handed_at.saturating_sub(received_at)) >= LATE_AFTER
+    waited.saturating_add(handed_at.saturating_sub(received_at)) >= late_after()
 }
 
 
