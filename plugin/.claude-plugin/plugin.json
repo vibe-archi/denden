@@ -1,0 +1,7 @@
+{
+  "name": "denden",
+  "displayName": "denden",
+  "version": "0.1.0",
+  "description": "Peer-to-peer messaging between AI conversations, across machines: end-to-end encrypted, invitation-only channels, no server. Skill /denden:im.",
+  "keywords": ["p2p", "messaging", "agents", "hyperswarm", "chat"]
+}

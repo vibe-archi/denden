@@ -1,0 +1,222 @@
+<!doctype html>
+  denden local page: one template for every page (invite, join, gone), filled by the denden binary
+  (crates/denden/src/ui.rs), which replaces the three placeholders LANG, NONCE and CONFIG, each
+  written once below between double braces (CONFIG is JSON with "<" escaped, so it cannot close the
+  script tag).
+  The invitation code is never shown and never in this HTML: the copy button fetches it from
+  POST <page>/api/reveal on a human click and puts it straight into the clipboard, so a browser driven
+  by an AI sees no code when it opens the page.
+-->
+<html lang="{{LANG}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>denden</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext x='16' y='25' font-size='24' text-anchor='middle'%3E%F0%9F%90%8C%3C/text%3E%3C/svg%3E">
+<style>
+:root {
+  --bg: #0b0d14; --bg2: #141832; --fg: #eef0f7; --muted: #8e95ad; --line: rgba(255, 255, 255, .12);
+  --a1: #35d0ba; --a2: #8b7bff; --ok: #3ddc97; --err: #ff6b7d; --field: rgba(255, 255, 255, .05);
+}
+@media (prefers-color-scheme: light) {
+  :root { --bg: #f2f4fa; --bg2: #e2e6f6; --fg: #141726; --muted: #5f667b; --line: rgba(20, 24, 40, .14);
+    --a1: #0fa38d; --a2: #6a5af9; --ok: #14a86b; --err: #d43a4f; --field: rgba(20, 24, 40, .04); }
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  display: grid; place-items: center; padding: 24px 16px; color: var(--fg);
+  background: radial-gradient(900px 600px at 50% 0%, var(--bg2), var(--bg));
+  font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing: antialiased;
+}
+main { width: min(420px, 100%); display: grid; gap: 22px; justify-items: center; text-align: center; animation: in .4s ease both; }
+@keyframes in { from { opacity: 0; transform: translateY(8px); } }
+.logo { width: 52px; height: 52px; border-radius: 16px; display: grid; place-items: center; font-size: 30px; line-height: 1; background: linear-gradient(135deg, var(--a1), var(--a2)); box-shadow: 0 10px 30px rgba(53, 208, 186, .3); }
+h1 { margin: 0; font-size: 20px; font-weight: 650; letter-spacing: -.2px; }
+h1 b { background: linear-gradient(135deg, var(--a1), var(--a2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.btn {
+  appearance: none; border: 0; width: 100%; padding: 16px 20px; border-radius: 14px; cursor: pointer;
+  font: 650 16px/1 inherit; color: #fff; background: linear-gradient(135deg, var(--a1), var(--a2));
+  box-shadow: 0 12px 32px rgba(53, 208, 186, .25); transition: transform .12s ease, box-shadow .2s ease, filter .2s;
+  display: inline-flex; justify-content: center; align-items: center; gap: 10px;
+}
+.btn:hover { transform: translateY(-1px); box-shadow: 0 16px 38px rgba(139, 123, 255, .32); }
+.btn:active { transform: none; }
+.btn:focus-visible, textarea:focus-visible { outline: 2px solid var(--a1); outline-offset: 3px; }
+.btn.done { background: var(--ok); color: #05261b; box-shadow: none; }
+.btn[disabled] { filter: grayscale(.6); opacity: .5; cursor: default; transform: none; box-shadow: none; }
+.next { margin: 0; color: var(--muted); font-size: 14px; min-height: 1.5em; }
+.next code { font: 13px ui-monospace, "Cascadia Code", Consolas, monospace; color: var(--fg); background: var(--field); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; }
+.next.err { color: var(--err); }
+textarea {
+  width: 100%; min-height: 96px; resize: none; padding: 14px; border-radius: 14px; border: 1px solid var(--line);
+  background: var(--field); color: var(--fg); font: 13px/1.5 ui-monospace, "Cascadia Code", Consolas, monospace; word-break: break-all;
+}
+textarea:focus { border-color: var(--a1); outline: none; }
+.clock { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; opacity: .8; }
+.spin { width: 15px; height: 15px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: r .7s linear infinite; }
+@keyframes r { to { transform: rotate(360deg); } }
+[hidden] { display: none !important; }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<main id="app"></main>
+<script type="application/json" id="cfg">{{CONFIG}}</script>
+<script nonce="{{NONCE}}">
+(() => {
+  const cfg = JSON.parse(document.getElementById('cfg').textContent)
+  const T = {
+    en: {
+      invite: (l) => `Invitation to <b>${l}</b>`, copy: 'Click to copy the code', copied: 'Code copied',
+      after: 'Send it privately, never in an AI chat. On the new machine: <code>/denden:im join &lt;channel&gt; as &lt;name&gt;</code>.',
+      used: 'This code was already copied from another page. Create a new invitation.',
+      manual: 'Copy it with Ctrl+C (⌘C), then send it privately to the other user.',
+      join: (l) => `Join <b>${l}</b>`, paste: 'Paste the invitation code', placeholder: 'denden_…',
+      pasteHint: 'Paste it in the box with Ctrl+V (⌘V).',
+      go: 'Join', invalid: 'Not an invitation code', joining: 'Joining…', joined: (l) => `Joined ${l}`,
+      back: 'Go back to your conversation: it is connecting.',
+      closes: 'Closes in', closed: 'This page is closed.', gone: 'This page has expired. Ask your conversation for a new one.',
+      network: 'The page is no longer active. Ask your conversation for a new one.'
+    },
+    fr: {
+      invite: (l) => `Invitation à <b>${l}</b>`, copy: 'Cliquer pour copier le code', copied: 'Code copié',
+      after: 'Envoyez-le en privé, jamais dans une conversation avec une IA. Sur la nouvelle machine : <code>/denden:im join &lt;canal&gt; as &lt;nom&gt;</code>.',
+      used: 'Ce code a déjà été copié depuis une autre page. Créez une nouvelle invitation.',
+      manual: 'Copiez-le avec Ctrl+C (⌘C), puis envoyez-le en privé à l\'autre utilisateur.',
+      join: (l) => `Rejoindre <b>${l}</b>`, paste: 'Coller le code d\'invitation', placeholder: 'denden_…',
+      pasteHint: 'Collez-le dans le cadre avec Ctrl+V (⌘V).',
+      go: 'Rejoindre', invalid: 'Ce n\'est pas un code d\'invitation', joining: 'Connexion…', joined: (l) => `Canal ${l} rejoint`,
+      back: 'Revenez à votre conversation : elle se connecte.',
+      closes: 'Fermeture dans', closed: 'Cette page est fermée.', gone: 'Cette page a expiré. Demandez-en une nouvelle à votre conversation.',
+      network: 'Cette page n\'est plus active. Demandez-en une nouvelle à votre conversation.'
+    }
+  }
+  const t = T[cfg.lang] || T.en
+  const app = document.getElementById('app')
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
+  const logo = '<div class="logo" aria-hidden="true">🐌</div>'
+  const check = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>'
+  const $ = (id) => document.getElementById(id)
+
+  // Calls carry a custom header and a JSON body: another site cannot send that without a CORS
+  // preflight, which the server never answers.
+  const call = async (action, body = {}) => {
+    const r = await fetch(`${location.pathname}/api/${action}`, {
+      method: 'POST', headers: { 'content-type': 'application/json', 'x-denden': '1' }, body: JSON.stringify(body)
+    })
+    const j = await r.json().catch(() => ({}))
+    if (!r.ok) throw Object.assign(new Error(j.error || r.statusText), { status: r.status })
+    return j
+  }
+
+  // The page empties itself when its time is up, and tries to close its tab.
+  let deadline = cfg.deadline, timer
+  function close() {
+    clearInterval(timer)
+    app.innerHTML = `<p class="next">${esc(t.closed)}</p>`
+    window.close()
+  }
+  function clock() {
+    clearInterval(timer)
+    const draw = () => {
+      const s = Math.max(0, Math.ceil((deadline - Date.now()) / 1000))
+      if (!s) return close()
+      $('clock').textContent = `${t.closes} ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+    }
+    draw(); timer = setInterval(draw, 500)
+  }
+  const soon = (seconds) => { deadline = Math.min(deadline, Date.now() + seconds * 1000); clock() }
+
+  function invite() {
+    app.innerHTML = `${logo}<h1>${t.invite(esc(cfg.label))}</h1>
+      <button class="btn" id="go">${esc(t.copy)}</button>
+      <p class="next" id="next"></p><div class="clock" id="clock"></div>`
+    clock()
+    // The code stays in this closure; it enters the page only for the instant of a copy (or, when
+    // the browser allows no copy at all, in a selected field the user copies by hand).
+    let code = null
+    const copy = async () => {
+      try { await navigator.clipboard.writeText(code); return true } catch {}
+      const area = document.createElement('textarea')
+      area.value = code; area.setAttribute('readonly', ''); area.style.cssText = 'position:fixed;opacity:0;top:0;left:0'
+      document.body.append(area); area.select()
+      let ok = false
+      try { ok = document.execCommand('copy') } catch {}
+      area.remove()
+      return ok
+    }
+    $('go').onclick = async () => {
+      const b = $('go'), next = $('next')
+      if (!code) {
+        b.disabled = true
+        try {
+          code = (await call('reveal')).code
+        } catch (x) {
+          b.disabled = false; next.className = 'next err'
+          next.textContent = x.status === 410 ? t.used : t.network
+          return
+        }
+        b.disabled = false
+      }
+      if (await copy()) {
+        b.className = 'btn done'; b.innerHTML = `${check}<span>${esc(t.copied)}</span>`
+        next.className = 'next'; next.innerHTML = t.after
+      } else {
+        // No clipboard access in this browser: let the user copy it, then hide it again.
+        b.hidden = true
+        next.className = 'next'; next.innerHTML = `<textarea id="manual" readonly>${esc(code)}</textarea><br>${esc(t.manual)}`
+        $('manual').select()
+        setTimeout(() => { $('manual')?.remove(); next.innerHTML = t.after }, 30000)
+      }
+      soon(60)
+    }
+  }
+
+  function join() {
+    app.innerHTML = `${logo}<h1>${t.join(esc(cfg.label))}</h1>
+      <textarea id="code" spellcheck="false" autocomplete="off" autocapitalize="off" placeholder="${esc(t.placeholder)}" aria-label="${esc(t.paste)}"></textarea>
+      <button class="btn" id="go">${esc(t.paste)}</button>
+      <p class="next" id="next"></p><div class="clock" id="clock"></div>`
+    clock()
+    const box = $('code'), b = $('go')
+    const value = () => box.value.replace(/\s+/g, '')
+    // The button always names the next step: paste, then join.
+    const state = () => {
+      const v = value()
+      $('next').className = 'next'; $('next').textContent = ''
+      if (!v) { b.disabled = false; b.textContent = t.paste; return }
+      const ok = /^denden_[A-Za-z0-9_-]{40,}$/.test(v)
+      b.disabled = !ok; b.textContent = ok ? t.go : t.invalid
+    }
+    box.addEventListener('input', state)
+    state(); box.focus()
+    b.onclick = async () => {
+      if (!value()) {
+        try { box.value = (await navigator.clipboard.readText()).trim() } catch {}
+        state()
+        if (!value()) { box.focus(); $('next').textContent = t.pasteHint }
+        return
+      }
+      b.disabled = true; b.innerHTML = `<span class="spin"></span><span>${esc(t.joining)}</span>`
+      try {
+        const r = await call('join', { code: value() })
+        box.remove()
+        b.className = 'btn done'; b.innerHTML = `${check}<span>${esc(t.joined(r.label || ''))}</span>`
+        $('next').textContent = t.back
+        soon(10)
+      } catch (x) {
+        state()
+        $('next').className = 'next err'; $('next').textContent = x.status ? x.message : t.network
+      }
+    }
+  }
+
+  if (cfg.page === 'invite') invite()
+  else if (cfg.page === 'join') join()
+  else app.innerHTML = `${logo}<p class="next">${esc(t.gone)}</p>`
+})()
+</script>
+</body>
+</html>

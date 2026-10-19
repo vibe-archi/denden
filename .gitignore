@@ -1,0 +1,7 @@
+/target/
+/target-*/
+
+# Plugin binaries are build outputs, copied in by the build (see README).
+/plugin/skills/im/denden.exe
+/plugin/skills/im/bin/*/
+/plugin/skills/im/SHA256SUMS

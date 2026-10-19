@@ -1,0 +1,40 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "mcp_tool",
+            "server": "denden",
+            "tool": "hook_prompt",
+            "input": {
+              "hook_event_name": "${hook_event_name}",
+              "prompt": "${prompt}",
+              "session_id": "${session_id}",
+              "cwd": "${cwd}"
+            },
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "mcp_tool",
+            "server": "denden",
+            "tool": "hook_stop",
+            "input": {
+              "hook_event_name": "${hook_event_name}",
+              "cwd": "${cwd}",
+              "session_id": "${session_id}",
+              "stop_hook_active": "${stop_hook_active}"
+            },
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

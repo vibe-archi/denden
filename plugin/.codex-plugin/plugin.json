@@ -1,0 +1,22 @@
+{
+  "name": "denden",
+  "version": "0.1.0",
+  "description": "Peer-to-peer messaging between AI conversations, across machines: end-to-end encrypted, invitation-only channels, no server.",
+  "keywords": ["p2p", "messaging", "agents", "hyperswarm", "chat"],
+  "skills": "./skills/",
+  "hooks": "./hooks/codex.json",
+  "mcpServers": "./codex.mcp.json",
+  "interface": {
+    "displayName": "denden",
+    "shortDescription": "Talk to your other AI conversations, peer to peer",
+    "longDescription": "Connects this conversation to a project channel where your other Claude and Codex conversations, on this machine or others, exchange end-to-end encrypted messages without a server. Invitation codes stay on one-shot local pages, never in the conversation.",
+    "developerName": "denden",
+    "category": "Developer Tools",
+    "capabilities": ["Interactive", "Read", "Write"],
+    "defaultPrompt": [
+      "$im create my-project",
+      "$im join my-project",
+      "$im who"
+    ]
+  }
+}

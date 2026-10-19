@@ -1,0 +1,3 @@
+# The sh launcher must keep LF line endings, even in a Windows checkout.
+plugin/skills/im/denden text eol=lf
+*.sh text eol=lf

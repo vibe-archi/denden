@@ -1,0 +1,21 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+# peeroxide 1.7.3 with the Node-interop fixes (upstream PR #31) plus what denden needs on top:
+# reconnect after a dropped connection, a newer connection replaces a stale one, bounded connect
+# attempts, and a Windows UDP fix in libudx. Branch im-rust of the fork, pinned to one commit so every
+# build uses exactly this source. Back to crates.io once upstream releases these fixes.
+# To work on peeroxide locally, temporarily replace `git` + `rev` with
+# `path = "D:/Projects/peeroxide/<crate>"`, then push to the fork and bump `rev`.
+[patch.crates-io]
+peeroxide = { git = "https://github.com/alaa-eddine/peeroxide.git", rev = "4864682bfa3d02481bb7d4f6631053a32a8f1696" }
+peeroxide-dht = { git = "https://github.com/alaa-eddine/peeroxide.git", rev = "4864682bfa3d02481bb7d4f6631053a32a8f1696" }
+libudx = { git = "https://github.com/alaa-eddine/peeroxide.git", rev = "4864682bfa3d02481bb7d4f6631053a32a8f1696" }
