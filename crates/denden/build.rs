@@ -1,5 +1,5 @@
 // Embeds the build time (milliseconds since the Unix epoch) as DENDEN_BUILD_TIME. Daemons record it, and
-// a CLI restarts a daemon from an older build of the same version (dev builds all say 0.2.0).
+// a CLI restarts a daemon from an older build of the same version (dev builds share a version).
 // Setting DENDEN_BUILD_TIME when building pins it (tests make an "older" and a "newer" build that way).
 
 use std::time::{SystemTime, UNIX_EPOCH};

@@ -1,9 +1,9 @@
 // Where daemons run from, and which build they are.
 //
 // A daemon runs for days, and on Windows a running executable cannot be deleted or replaced. So the
-// daemon never runs from the file a host installed (the plugin's im.exe): it runs from a copy under
-// DENDEN_HOME/bin named after the version and the content hash (dev builds all say 0.2.0), written
-// atomically and checked against that hash before every start. Daemons record their build in
+// daemon never runs from the file a host installed (the plugin's denden.exe): it runs from a copy
+// under DENDEN_HOME/bin named after the version and the content hash (dev builds share a version),
+// written atomically and checked against that hash before every start. Daemons record their build in
 // daemon.json; a command from a newer build restarts a daemon from an older one, never the reverse,
 // so two installed builds (Claude Code runs the plugin from the repo, Codex from its own cache) never
 // keep restarting each other.

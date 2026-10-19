@@ -19,7 +19,7 @@ name="denden-$version-$(git rev-parse --short HEAD)"
 stage=$(mktemp -d)
 mkdir -p "$stage/denden-package"
 cp -r .claude-plugin .agents plugin "$stage/denden-package/"
-rm -f "$stage"/denden-package/plugin/skills/im/denden.exe.old-*
+rm -f "$stage"/denden-package/plugin/skills/im/denden.exe.old-* "$stage"/denden-package/plugin/skills/im/SOURCE
 cp docs/INSTALL.md "$stage/denden-package/INSTALL.md"
 mkdir -p dist
 rm -f "dist/$name.tar.gz" "dist/$name.zip"

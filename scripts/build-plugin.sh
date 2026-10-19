@@ -3,11 +3,20 @@
 #   denden.exe              Windows x64 (MSVC), next to the sh launcher (a host that starts
 #                           ./skills/im/denden without a shell resolves it to denden.exe)
 #   bin/linux-x64/denden    Linux x86-64, static (musl), built in WSL
-# then writes SHA256SUMS. Run from Git Bash on Windows, at the root of the repository.
+# then writes SHA256SUMS and SOURCE. Run from Git Bash on Windows, at the root of the repository.
 set -eu
 root=$(cd "$(dirname "$0")/.." && pwd)
 skill="$root/plugin/skills/im"
 cd "$root"
+# What goes into the binary (the local page is embedded with include_str!).
+SOURCES="crates Cargo.toml Cargo.lock plugin/skills/im/pages"
+# Which sources the binaries come from, for scripts/publish-release.sh: a hash of the committed
+# source tree, or "uncommitted" when the build starts with changes not committed yet.
+if [ -z "$(git status --porcelain -- $SOURCES)" ]; then
+  source=$(git ls-tree -r HEAD -- $SOURCES | git hash-object --stdin)
+else
+  source=uncommitted
+fi
 
 echo "== Windows x64"
 cargo build --release
@@ -25,6 +34,8 @@ wsl -e bash -lc "cd '$wsl_root' && CARGO_TARGET_DIR=target-linux cargo build --r
 mkdir -p "$skill/bin/linux-x64"
 cp target-linux/x86_64-unknown-linux-musl/release/denden "$skill/bin/linux-x64/denden"
 chmod +x "$skill/bin/linux-x64/denden" "$skill/denden"
+
+echo "$source" > "$skill/SOURCE"
 
 cd "$skill"
 sha256sum denden.exe bin/linux-x64/denden > SHA256SUMS

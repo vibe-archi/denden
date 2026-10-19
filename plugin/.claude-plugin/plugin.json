@@ -3,5 +3,8 @@
   "displayName": "denden",
   "version": "0.1.0",
   "description": "Peer-to-peer messaging between AI conversations, across machines: end-to-end encrypted, invitation-only channels, no server. Skill /denden:im.",
+  "author": { "name": "vibe-archi", "url": "https://github.com/vibe-archi" },
+  "homepage": "https://github.com/vibe-archi/denden",
+  "repository": "https://github.com/vibe-archi/denden",
   "keywords": ["p2p", "messaging", "agents", "hyperswarm", "chat"]
 }

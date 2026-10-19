@@ -58,10 +58,12 @@ In Claude Code the commands are `/denden:im …`; in Codex, `$im …`. You can a
 
 ## Install
 
-From this repository, after building the binaries (see below):
+denden installs from this repository's `release` branch, which carries the plugin with its binaries.
+
+**Claude Code:**
 
 ```bash
-claude plugin marketplace add D:/Projects/P2P/denden
+claude plugin marketplace add vibe-archi/denden@release
 ```
 
 ```bash
@@ -74,7 +76,19 @@ Then open a new session, and add this rule to `~/.claude/settings.json` so the A
 { "permissions": { "deny": ["Read(~/.denden/**)"] } }
 ```
 
-For Codex, from another machine with a package, and to uninstall everything: see [docs/INSTALL.md](docs/INSTALL.md).
+**Codex:**
+
+```bash
+codex plugin marketplace add vibe-archi/denden@release
+```
+
+```bash
+codex plugin add denden@denden
+```
+
+At the first start, approve the plugin's two hooks, and let Codex run the denden command outside its sandbox: it needs the network.
+
+Updates, offline installs from a release package, and uninstalling everything: see [docs/INSTALL.md](docs/INSTALL.md).
 
 ## Known limits
 
@@ -82,21 +96,45 @@ For Codex, from another machine with a package, and to uninstall everything: see
 - **Strict NATs.** Some networks give a different port for each destination (corporate networks, 4G and 5G hotspots, some routers). A machine behind such a NAT can reach the others but cannot be reached, so it opens the connection itself: it usually works, in about half a minute to a minute and a half. Two machines both behind a strict NAT cannot connect: that would need a relay, which denden does not use (see [docs/architecture.md](docs/architecture.md#7-known-limits)).
 - **Platforms.** Windows x64 and Linux x64 for now: no macOS or Linux ARM binary yet.
 
-## Build
+## Development
+
+```bash
+git clone git@github.com:vibe-archi/denden.git
+```
+
+The Rust sources are in `crates/denden` (one binary: CLI, daemon, MCP server), the plugin in `plugin/`. main holds the sources only: the binaries are build outputs.
 
 ```bash
 sh scripts/build-plugin.sh
 ```
 
-Builds `denden.exe` (Windows x64) and `bin/linux-x64/denden` (static Linux x64, built in WSL) into `plugin/skills/im/`, with `SHA256SUMS`. These binaries are not versioned. The local page (`plugin/skills/im/pages/ui.html`) is embedded in the binary: rebuild after changing it.
+Builds `denden.exe` (Windows x64) and `bin/linux-x64/denden` (static Linux x64, built in WSL) into `plugin/skills/im/`, with `SHA256SUMS`. Run it from Git Bash on Windows. The local page (`plugin/skills/im/pages/ui.html`) is embedded in the binary: rebuild after changing it.
+
+To try your build, add the clone itself as a marketplace (`claude plugin marketplace add <clone>`, `codex plugin marketplace add <clone>`), then install `denden@denden` as above. Claude Code reads a local marketplace in place, so a change takes effect at the next session; Codex keeps a copy, so run `codex plugin add denden@denden` again after a change.
+
+peeroxide comes from the `alaa-eddine/peeroxide` fork, pinned to a commit in `Cargo.toml`. To change it, point the patch at a local checkout for a while (`path = "../../peeroxide/<crate>"`).
+
+### Releasing
+
+Raise `version` in `plugin/.claude-plugin/plugin.json` and `plugin/.codex-plugin/plugin.json` (Claude Code hands users a new copy only when it changes), commit, then:
+
+```bash
+sh scripts/build-plugin.sh
+```
+
+```bash
+sh scripts/publish-release.sh
+```
 
 ```bash
 sh scripts/pack-plugin.sh
 ```
 
-Packs the marketplaces, the plugin with its binaries and the install guide into `dist/denden-<version>-<commit>.tar.gz` (Linux) and `.zip` (Windows).
+```bash
+git push origin main release v<version>
+```
 
-peeroxide comes from the `alaa-eddine/peeroxide` fork, pinned to a commit in `Cargo.toml`. To change it, point the patch at a local checkout for a while (`path = "../../peeroxide/<crate>"`).
+`publish-release.sh` checks that the binaries come from the committed sources, then adds a commit to the `release` branch (marketplaces, plugin with binaries, docs, README) and tags it `v<version>`. `pack-plugin.sh` makes the offline packages, `dist/denden-<version>-<commit>.tar.gz` (Linux) and `.zip` (Windows), to attach to the GitHub release of that tag.
 
 ## Tests
 
@@ -114,6 +152,6 @@ The second one simulates two machines (two `DENDEN_HOME`, two machine names) on 
 
 - [docs/design.md](docs/design.md): the user experience, every flow and its outputs, the decisions.
 - [docs/architecture.md](docs/architecture.md): data, protocol, daemon, CLI, known limits.
-- [docs/INSTALL.md](docs/INSTALL.md): manual install, update, uninstall.
+- [docs/INSTALL.md](docs/INSTALL.md): install, update, offline packages, uninstall.
 
 Everything denden keeps is in `~/.denden` (or `$DENDEN_HOME`), on your machine only.

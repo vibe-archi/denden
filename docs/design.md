@@ -441,16 +441,17 @@ denden/
     hooks/
     codex.mcp.json
     skills/im/                      SKILL.md, launcher, local page, binaries
-  scripts/                          building the binaries, packing the plugin
+  scripts/                          building the binaries, publishing a release, packing the plugin
   tests/e2e/                        end-to-end tests
   docs/
     design.md                       this document
     architecture.md                 technical choices
-    INSTALL.md                      manual install, shipped in the package
+    INSTALL.md                      install, update, uninstall
     notes/                          reports carried over from the prototype
   README.md
 ```
 
+- **Hosted at [github.com/vibe-archi/denden](https://github.com/vibe-archi/denden).** main holds the sources only. The `release` branch, written by `scripts/publish-release.sh` and tagged `v<version>`, holds what users install: the marketplaces, the plugin with its binaries, the docs. Users add it with `vibe-archi/denden@release`; the offline packages go with the GitHub release of each tag.
 - **Rust only**, no Node version any more. macOS and Linux arm64 binaries will come with distribution.
 - **peeroxide** lives separately, in `D:\Projects\peeroxide`. denden depends on it through the `alaa-eddine/peeroxide` fork, pinned to a commit. To change it, point temporarily at the local folder.
 - The prototype is not carried over: only its reports (interoperability, end-to-end tests, Codex heartbeat) join `docs/notes/`.
