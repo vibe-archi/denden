@@ -79,6 +79,12 @@ sh tests/e2e/two-machines.sh target/debug/denden
 
 Le second simule deux machines (deux `DENDEN_HOME`, deux noms de machine) sur le vrai réseau P2P : création, invitation, rejoindre, question et réponse, envoi à tout le canal, `who`, reprise et déplacement d'un denden, écoute.
 
+## Limites connues
+
+- **NAT strict.** Certains NAT donnent un port différent pour chaque destination : réseaux d'entreprise, partages de connexion 4G et 5G, certaines box. Une machine derrière un tel NAT peut joindre les autres, mais les autres ne peuvent pas la joindre : c'est donc elle qui doit ouvrir la connexion. Comme les deux machines essaient en même temps, ça passe en général, en une demi-minute à une minute et demie environ. Si les deux machines sont derrière un NAT strict, elles ne se joignent pas : il faudrait un relais, pas encore pris en charge (voir [docs/architecture.md](docs/architecture.md#7-limites-connues)).
+- **Plateformes.** Windows x64 et Linux x64 seulement pour l'instant : pas de binaire macOS ni Linux ARM.
+- **Hors ligne.** Un message n'est remis que lorsque les deux machines sont en ligne en même temps. Il attend chez l'expéditeur jusqu'à 7 jours. `keepalive on` garde le démon d'un serveur allumé pour qu'il reçoive à tout moment.
+
 ## Données
 
 Tout est dans `~/.denden` (ou `$DENDEN_HOME`) : un dossier par canal (secret, clé de la machine, machines connues, noms, messages, file d'attente), les conversations branchées, le démon. Un seul démon par machine ; il s'arrête quand plus aucune conversation n'écoute, sauf avec `keepalive on`.

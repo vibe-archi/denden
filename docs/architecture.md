@@ -89,3 +89,25 @@ Dans chaque flux chiffré par Noise, des trames JSON séparées par des retours 
 | 5 | Réveils | écoute Claude, file Codex, hooks, budget, messages en retard, présence MCP | réveil dans Claude et dans Codex |
 | 6 | Plugin | SKILL.md réécrit, page, manifestes, script de construction des binaires, README | installation depuis les places de marché locales |
 | 7 | Validation | tests de bout en bout, test avec l'utilisateur dans Claude et Codex | parcours complet validé |
+
+## 7. Limites connues
+
+### NAT strict
+
+Mesuré le 19 octobre 2026 avec `tests/e2e/nat.sh`. Une machine se trouvait dans un espace réseau Linux derrière un NAT `nft masquerade fully-random`, qui donne un port différent pour chaque destination. L'autre machine se trouvait derrière une box ordinaire.
+
+| Cas | Résultat |
+|---|---|
+| Machine publique ↔ NAT ordinaire | connecté en 15 à 17 s |
+| NAT ordinaire ↔ NAT ordinaire | connecté en 16 à 23 s |
+| NAT strict ↔ NAT ordinaire | connecté en général, en 24 à ~100 s ; quelques essais n'aboutissent pas dans les 90 s d'attente de `join` |
+| NAT strict ↔ NAT strict | non testé ; impossible sans relais |
+
+Le comportement de peeroxide (fork, commit `43d3de4`) :
+- **Côté qui initie la connexion :** derrière un NAT strict, peeroxide ouvre 256 sockets de secours (attaque des anniversaires), et la sonde gagnante arrive sur l'une d'elles. Avant `43d3de4`, la connexion partait ensuite de la socket principale, que le NAT traduit vers un autre port, et elle n'aboutissait jamais. Elle part désormais de la socket gagnante, comme dans la version Node.
+- **Côté qui reçoit, derrière un NAT strict : non pris en charge.** libudx n'attache une connexion en attente qu'à la socket principale, alors que les paquets arrivent sur une socket de secours. Une machine derrière un NAT strict ne peut donc être jointe par personne : il faut que ce soit elle qui ouvre la connexion. Comme chaque paire de machines tente les deux sens en même temps, cela suffit le plus souvent.
+- **Deux NAT stricts :** aucun perçage ne peut aboutir. Il faudrait un relais aveugle : peeroxide sait le faire (`peeroxide relay`, `SwarmConfig::relay_through`), mais denden ne l'utilise pas encore. Ce relais ne verrait pas le contenu (chiffrement de bout en bout), seulement les adresses IP, les horaires et les volumes. Il faut l'héberger sur une machine joignable : peeroxide ne fournit pas de relais public.
+
+Pistes, à trancher plus tard :
+1. dans libudx, recevoir le premier paquet d'une connexion en attente sur n'importe quelle socket du perçage, comme le fait udx-native ;
+2. dans denden, un relais aveugle de secours, hébergé par un membre du canal qui a une IP publique.
