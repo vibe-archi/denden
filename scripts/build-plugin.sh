@@ -11,6 +11,12 @@ cd "$root"
 
 echo "== Windows x64"
 cargo build --release
+# A running denden.exe (a listener, Codex's MCP server) is locked by Windows: it cannot be
+# overwritten, but it can be renamed. The renamed copies go once nothing runs them any more.
+for old in "$skill"/denden.exe.old-*; do [ -e "$old" ] && rm -f "$old" 2>/dev/null; done
+if [ -e "$skill/denden.exe" ] && ! rm -f "$skill/denden.exe" 2>/dev/null; then
+  mv "$skill/denden.exe" "$skill/denden.exe.old-$(date +%s)"
+fi
 cp target/release/denden.exe "$skill/denden.exe"
 
 echo "== Linux x64 (musl, in WSL)"

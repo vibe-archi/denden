@@ -265,6 +265,20 @@ mod tests {
     use super::*;
 
     #[test]
+    fn page_renders_without_stray_text() {
+        let cfg = PageConfig { page: Page::Invite, name: String::new(), label: "test-chan".into(), expires: "15:40".into() };
+        let html = render_page(&cfg, "en", "nonce123", 0);
+        // The header comment stays a comment: nothing but markup before <html>.
+        let head = &html[..html.find("<html").expect("an html element")];
+        let outside = head.replace("<!doctype html>", "");
+        let outside = outside.trim();
+        assert!(outside.starts_with("<!--") && outside.ends_with("-->"), "text outside the comment: {outside}");
+        assert_eq!(outside.matches("<!--").count(), 1);
+        assert!(!html.contains("{{"), "a placeholder left");
+        assert!(html.contains("\"label\":\"test-chan\""));
+    }
+
+    #[test]
     fn local_pages_only() {
         assert!(is_local_page(&format!("http://127.0.0.1:8123/p/{}", "a1".repeat(16))));
         assert!(!is_local_page(&format!("http://127.0.0.1:8123/p/{}/api/reveal", "a1".repeat(16))));
