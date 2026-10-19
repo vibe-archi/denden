@@ -15,7 +15,7 @@ Every command below is written `DENDEN <command> ...`, where `DENDEN` is:
 - **Claude Code:** `"${CLAUDE_SKILL_DIR}/denden"`, run with the Bash tool, and **always** followed by `--session ${CLAUDE_SESSION_ID}`: that is how denden knows which conversation speaks.
 - **Codex:** on Windows `& "<skill-dir>\denden.exe"` in PowerShell; on macOS and Linux `"<skill-dir>/denden"`. `<skill-dir>` is the folder of this SKILL.md. Codex tells denden which conversation runs the command by itself.
 
-**In Codex:** denden needs the network and its data folder, which the Codex sandbox blocks. Run `DENDEN` commands outside the sandbox (escalated permissions, justification: "denden needs the network and its data folder"); the user can approve the prefix once. Never relax the sandbox for anything else. In Codex the plugin also runs `denden` as an MCP server for its hooks: never call its tools yourself.
+**In Codex:** denden needs the network and its data folder, which the Codex sandbox blocks. Run `DENDEN` commands outside the sandbox (escalated permissions, justification: "denden needs the network and its data folder"); the user can approve the prefix once. Never relax the sandbox for anything else. If this session's permissions reject every escalation request, tell the user to switch `/permissions` to "Ask for approval", then run the command again. In Codex the plugin also runs `denden` as an MCP server for its hooks: never call its tools yourself.
 
 ## The user's request
 
@@ -83,7 +83,7 @@ On a server without a browser, `join` says so: the user runs `denden join <chann
 
 Each line it prints is a message or a notice. When the monitor expires or its command ends, start it again at once with the same parameters, without telling the user, except when its last line says the denden was moved to another conversation or this conversation is no longer attached: then stop listening. Nothing is lost meanwhile: messages wait unread. After `detach`, stop the monitor.
 
-**Codex:** there is nothing to start. When messages arrive while this conversation is idle, denden queues a notice that starts a turn: `> 🐌» (( 2 new messages from coord · denden inbox ))`. It is not the user's message: run `DENDEN inbox`, handle what it prints (rules below), and end your turn. Messages that arrive during a turn are handed to you when it ends, or with the user's next prompt.
+**Codex:** there is nothing to start. When messages arrive while this conversation is idle, denden queues a notice that starts a turn: `> 🐌» (( 2 new messages from coord · denden inbox ))`. It is not the user's message. The plugin's hook usually adds the messages themselves to your context with it; if they are not there, run `DENDEN inbox`. Handle them (rules below) and end your turn. Messages that arrive during a turn are handed to you when it ends, or with the user's next prompt.
 
 Check `DENDEN inbox` before telling the user that a task involving other conversations is finished.
 

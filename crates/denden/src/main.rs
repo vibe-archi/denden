@@ -288,6 +288,13 @@ pub(crate) fn try_ensure_daemon() -> Result<(), String> {
             None => Ok(()),
         };
     }
+    // A daemon that runs but cannot be reached, from inside a sandbox: starting another one is
+    // no use.
+    if daemon_info(&dir).is_some_and(|i| is_alive(i.pid)) {
+        if let Some(why) = sandbox_hint() {
+            return Err(why);
+        }
+    }
     if wait_for_restart() {
         return Ok(());
     }
@@ -355,13 +362,22 @@ fn start_daemon() -> Result<(), String> {
     if daemon_up(&home()) {
         return Ok(());
     }
-    let tail = std::fs::read_to_string(&log_file)
-        .map(|t| {
-            let lines: Vec<&str> = t.split('\n').collect();
-            lines[lines.len().saturating_sub(15)..].join("\n")
-        })
-        .unwrap_or_default();
-    Err(format!("the daemon failed to start. Log ({}):\n{tail}", log_file.display()))
+    if let Some(why) = sandbox_hint() {
+        return Err(why);
+    }
+    // The log stays out of the conversation: it says what each machine did, which is no business of
+    // the AI's. The user can read it.
+    Err(format!("The daemon failed to start · its log is in {} · /denden:im check for a report", log_file.display()))
+}
+
+/// Inside the Codex sandbox, denden can reach neither the network nor its data folder, not even a
+/// daemon already running here. Codex marks its commands with CODEX_SANDBOX_NETWORK_DISABLED, but
+/// it leaves it set outside the sandbox too: it only explains a daemon that cannot be reached.
+fn sandbox_hint() -> Option<String> {
+    let codex = std::env::var("CODEX_SANDBOX").is_ok_and(|v| !v.is_empty()) || std::env::var("CODEX_SANDBOX_NETWORK_DISABLED").is_ok_and(|v| v == "1");
+    codex.then(|| {
+        "denden cannot reach its daemon from the Codex sandbox, which blocks the network and its data folder · run this command outside the sandbox (escalated permissions). If Codex answers that this session refuses such requests, switch /permissions to \"Ask for approval\"".to_string()
+    })
 }
 
 /// One request to the daemon (started if needed). The JSON answer, errors included: an "error"

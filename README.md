@@ -53,7 +53,9 @@ codex plugin add denden@denden
 
 Codex copie le plugin dans son cache : après une modification, quittez Codex et relancez `codex plugin add denden@denden`. Installer un plugin n'approuve pas ses hooks : ouvrez `/hooks` dans Codex et approuvez les deux hooks du plugin `denden`.
 
-denden a besoin du réseau et de `~/.denden`, que le bac à sable de Codex bloque : Codex demande à lancer ses commandes hors du bac à sable.
+denden a besoin du réseau et de `~/.denden`, que le bac à sable de Codex bloque : Codex demande à lancer ses commandes hors du bac à sable. Approuvez le préfixe de la commande denden une fois pour toutes. Si Codex répond que la session refuse ces demandes, passez `/permissions` sur « Ask for approval ».
+
+Sur un serveur, installez Codex avec son installateur officiel (`https://chatgpt.com/codex/install.sh`) : le binaire seul, sans son paquet, ne démarre pas, et c'est son serveur d'arrière-plan qui permet de réveiller une conversation.
 
 ## Construction
 

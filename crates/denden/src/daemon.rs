@@ -860,7 +860,10 @@ fn who(st: &State, b: &Value) -> Value {
         .map(|n| {
             let mine = n.k == c.ch.me;
             let online = mine || c.peers.contains_key(&n.k);
-            let state = if !online {
+            let state = if !online && now.saturating_sub(st.started_at) < 30_000 {
+                // This daemon has just started: the others are being reached.
+                "connecting".into()
+            } else if !online {
                 let seen = c.ch.members.machines.get(&n.k).map(|m| m.seen).unwrap_or(0);
                 if seen > 0 { format!("offline since {}", crate::time::ago(now, seen).trim_end_matches(" ago")) } else { "offline".into() }
             } else if !n.on {

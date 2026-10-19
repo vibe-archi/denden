@@ -35,7 +35,10 @@ wait
 
 step "remote: the machine joins from its terminal (code typed, hidden)"
 t0=$(date +%s)
-out=$(printf '%s\n' "$code" | $SSH -tt "$RB join xnet" 2>&1 | tr -d '\r'); echo "$out"
+# The code goes in once the prompt has turned echo off (a pseudo-terminal echoes what arrives
+# before), and anything that looks like a code is masked in what comes back, whatever happens.
+out=$( (sleep 4; printf '%s\n' "$code") | $SSH -tt "$RB join xnet" 2>&1 | tr -d '\r' | sed -E 's/denden_[A-Za-z0-9_-]{20,}/denden_<masked>/g'); echo "$out"
+if printf '%s' "$out" | grep -q 'denden_<masked>'; then echo "   FAIL: the terminal echoed the code (masked here)"; fails=$((fails + 1)); else echo "   ok: the code was not echoed"; fi
 code=""
 echo "   ($(( $(date +%s) - t0 )) s)"
 expect "admitted" "joined xnet" "$out"
