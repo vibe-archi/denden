@@ -27,7 +27,7 @@ rm -f "dist/$name.tar.gz" "dist/$name.zip"
 # Linux archive, made in WSL so the launcher and the Linux binary keep their executable bit.
 wsl_stage=$(wsl -e wslpath -a "$(cygpath -w "$stage")" | tr -d '\r')
 wsl_dist=$(wsl -e wslpath -a "$(cygpath -w "$root/dist")" | tr -d '\r')
-wsl -e bash -c "set -e; t=\$(mktemp -d); cp -r '$wsl_stage/denden-package' \"\$t/\"; chmod 755 \"\$t/denden-package/plugin/skills/im/denden\" \"\$t/denden-package/plugin/skills/im/bin/linux-x64/denden\"; tar -czf '$wsl_dist/$name.tar.gz' -C \"\$t\" denden-package; rm -rf \"\$t\""
+wsl -e bash -c "set -e; t=\$(mktemp -d); cp -r '$wsl_stage/denden-package' \"\$t/\"; find \"\$t/denden-package\" -type d -exec chmod 755 {} +; find \"\$t/denden-package\" -type f -exec chmod 644 {} +; chmod 755 \"\$t/denden-package/plugin/skills/im/denden\" \"\$t/denden-package/plugin/skills/im/bin/linux-x64/denden\"; tar -czf '$wsl_dist/$name.tar.gz' -C \"\$t\" denden-package; rm -rf \"\$t\""
 
 # Windows archive, with Windows' own tar (bsdtar), which writes zip files.
 (cd "$stage" && /c/Windows/System32/tar.exe -a -c -f "$(cygpath -w "$root/dist/$name.zip")" denden-package)
