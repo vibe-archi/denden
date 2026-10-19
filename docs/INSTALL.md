@@ -109,7 +109,9 @@ Dans cet ordre :
    codex plugin marketplace remove denden
    ```
 
-   Vérifiez ensuite `~/.codex/config.toml` : supprimez les sections `[hooks.state."denden@denden:…"]` qui resteraient.
+   Deux restes à supprimer à la main :
+   - dans `~/.codex/config.toml`, les sections `[hooks.state."denden@denden:…"]` (deux lignes chacune). Sinon, une réinstallation retrouve les hooks déjà approuvés ;
+   - le dossier `~/.codex/plugins/cache/denden`.
 
 4. **Les données** : canaux, clés de machine, historique, conversations branchées. **C'est irréversible** : la machine devra être invitée à nouveau dans chaque canal. Sous Linux :
 
