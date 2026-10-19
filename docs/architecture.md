@@ -1,113 +1,120 @@
-# denden : architecture technique
+# denden: technical architecture
 
-Ce document traduit [design.md](design.md) en choix techniques. Il décrit ce que le code doit faire ; le document de conception reste la référence pour l'expérience utilisateur.
+This document turns [design.md](design.md) into technical choices. It describes what the code does; the design document remains the reference for the user experience.
 
-## 1. Choix par défaut pris pour démarrer
+## 1. Choices made for the open points
 
-Points de la section 12 de design.md tranchés ici pour avancer. Ils restent révisables :
-- **Langue des textes fixes : l'anglais.** C'est la langue des premiers exemples validés (`Received message from bob@project-xx`) et celle d'un plugin distribué. L'IA rapporte ces lignes dans la langue de l'utilisateur, en gardant la forme `> 🐌» (( … ))`.
-- **Sorties sur plusieurs lignes** : chaque ligne est une citation `> 🐌» (( … ))`, la première sert de titre.
-- **`DENDEN_AS` disparaît.** Une conversation est identifiée par sa session : `--session ${CLAUDE_SESSION_ID}` pour Claude, `CODEX_THREAD_ID` pour Codex.
-- **Version du protocole : 3.** Les libellés de dérivation (`agent-im/v2/...`) ne changent pas ; ce qui change, ce sont les échanges, et la preuve d'ouverture annonce `v: 3`. Aucune compatibilité avec agent-im n'est recherchée.
-- **Avis de nouvelle machine** : il va à toutes les conversations branchées sur le canal, sur les machines qui la voient arriver, sans les réveiller. Il leur est remis avec leurs prochains messages.
-- **Commandes sensibles** : en plus de `invite`, `block`, `unblock` et `auto`, le skill interdit de lancer `join`, `detach`, `delete`, `leave`, `wakes` et `keepalive` à la demande d'un message.
-- **Page d'invitation après la copie** : elle affiche la suite à faire, puis se ferme au bout de 60 secondes.
-- **Doublon de nom de canal (question 33)** : le nom local d'un canal est celui que l'utilisateur tape dans `join`. `join vibedoc-paul as front` rejoint, sous ce nom local, le canal du code collé, quel que soit le nom que lui donne son créateur ; `join` sur un nom déjà présent branche la conversation sur ce canal-là.
+Points of section 12 of design.md, settled here to move forward. They can still be revised:
+- **Language of the fixed texts: English.** It is the language of the first approved examples (`Received message from bob@project-xx`) and that of a distributed plugin. The AI relays these lines in the user's language, keeping the `> 🐌» (( … ))` shape. The local pages are in English or French, after the browser's `Accept-Language`.
+- **Outputs on several lines**: one quote, every line after the first starting with `> `; the first line serves as a title. `who` adds a Markdown table under it.
+- **`DENDEN_AS` goes away.** A conversation is identified by its session: `--session ${CLAUDE_SESSION_ID}` for Claude, `CODEX_THREAD_ID` for Codex.
+- **Protocol version: 3.** The derivation labels (`agent-im/v2/...`) do not change; what changes is the exchanges, and the opening proof announces `v: 3`. No compatibility with agent-im is sought.
+- **New machine notice**: it goes to every conversation attached to the channel, on the machines that see the newcomer arrive, without waking them. It is handed to them with their next messages.
+- **Sensitive commands**: on top of `invite`, `block`, `unblock` and `auto`, the skill forbids running `join`, `detach`, `delete`, `leave`, `wakes` and `keepalive` because a message asked.
+- **Invitation page after the copy**: it shows the next step, then closes after 60 seconds. The join page does the same after a successful join.
+- **Duplicate channel name (question 33)**: the local name of a channel is the one the user types in `join`. `join vibedoc-paul as front` joins, under that local name, the channel of the pasted code, whatever name its creator gave it; `join` on a name already present attaches the conversation to that channel.
 
-## 2. Données sur le disque (`~/.denden`)
+## 2. Data on disk (`~/.denden`)
 
 ```text
 ~/.denden/
-  daemon.json  daemon.lock  daemon.log   le démon de la machine
-  bin/                                   copies vérifiées du binaire (Windows verrouille un exe lancé)
-  conversations.json                     conversation -> canal, denden, application, mode, budget
-  channels/<cid>/                        un dossier par canal ; <cid> = 16 premiers hex de l'id du canal
-    channel.json                         secret, libellé local, graine de la clé machine, certificats, invitations
-    members.json                         machines connues (clé -> nom, vue la dernière fois), clés bloquées
-    names.json                           certificats de noms : denden -> machine propriétaire
-    messages.jsonl                       messages reçus et envoyés, par denden local
-    state.json                           ce qui a été lu, par denden local
-    outbox.json                          messages en attente, par machine destinataire
+  daemon.json  daemon.lock  daemon.log   the machine's daemon (daemon.json: port, token, pid, build)
+  restart.json                           a command is restarting a daemon from an older build
+  bin/                                   checked copies of the binary (Windows locks a running exe)
+  conversations.json                     conversation -> channel, denden, application, mode, budget
+  wakes.json                             wake-up state per conversation (budget spent, Codex notice pending)
+  settings.json                          keepalive, notices already given once
+  channels/<cid>/                        one folder per channel; <cid> = first 16 hex of the channel id
+    channel.json                         secret, local label, machine key seed, certificates, invitations
+    members.json                         known machines (key -> name, last seen), blocked keys
+    names.json                           name certificates: denden -> owner machine
+    messages.jsonl                       messages received and sent, per local denden
+    state.json                           what was read, per local denden
+    outbox.json                          messages waiting, per receiving machine
 ```
 
-- **Une clé de machine par canal**, pour qu'on ne puisse pas relier ses canaux entre eux. Son nom est le nom d'hôte nettoyé.
-- **Le dossier d'un canal porte son identifiant**, pas son libellé, qui n'est qu'un nom local modifiable au moment de rejoindre.
-- **Une conversation** se note `claude:<session>` ou `codex:<thread>`.
+- **One machine key per channel**, so that nobody can link its channels together. Its name is the cleaned host name.
+- **A channel's folder carries its id**, not its label, which is only a local name chosen when joining.
+- **A conversation** is written `claude:<session>` or `codex:<thread>`.
 
-## 3. Protocole (version 3)
+## 3. Protocol (version 3)
 
-Dans chaque flux chiffré par Noise, des trames JSON séparées par des retours à la ligne :
+Inside each Noise-encrypted stream, JSON frames separated by newlines:
 
-| trame | rôle |
+| frame | role |
 |---|---|
-| `{t:'auth', v:3, proof}` | preuve de connaissance du secret, avant tout autre échange (inchangée) |
-| `{t:'hello', machine, key, sig, chain?, inv?, needCert?, names}` | la machine se présente ; `names` porte les certificats de noms qu'elle connaît |
-| `{t:'cert', chain}` | un membre remet un certificat d'appartenance à la machine qu'il vient d'admettre |
-| `{t:'names', names}` | nouveaux noms, suppressions, abandons après conflit |
-| `{t:'msg', id, from, to, text, ts, ask?, re?, waited}` | un message ; `to` est une liste de denden ou `"all"` |
-| `{t:'ack', id}` / `{t:'nack', id, error}` | accusé de réception, ou refus |
-| `{t:'error', error}` | refus de la connexion |
+| `{t:'auth', v:3, proof}` | proof of knowledge of the secret, before any other exchange (unchanged) |
+| `{t:'hello', machine, key, sig, chain?, inv?, needCert?, names, members?}` | the machine introduces itself; `names` carries the name certificates it knows |
+| `{t:'cert', chain}` | a member hands a membership certificate to the machine it just admitted |
+| `{t:'names', names}` | new names, deletions, releases after a conflict |
+| `{t:'msg', id, from, to, text, ts, ask?, re?, waited}` | a message; `to` is a list of denden or `"all"` |
+| `{t:'ack', id}` / `{t:'nack', id, error}` | acknowledgement, or refusal |
+| `{t:'error', error}` | refusal of the connection |
 
-**Appartenance.** Une machine est admise par un jeton d'invitation à usage unique, puis reçoit un certificat signé par celle qui l'a invitée. Les autres l'acceptent si la chaîne de certificats remonte à une clé qu'ils connaissent. Les certificats désignent des clés de machine : deux machines peuvent porter le même nom.
+**Membership.** A machine is admitted with a single-use invitation token, then receives a certificate signed by the machine that invited it. The others accept it if the certificate chain goes back to a key they know. Certificates name machine keys: two machines may carry the same name.
 
-**Certificats de noms.** `{n, k, t, s, d?, r?}` : le denden `n` appartient à la machine de clé `k`, créé à la date `t`, signé par `k`. `d` marque une suppression (le nom reste lié à la machine), `r` un abandon après conflit. Chaque machine les diffuse dans son `hello` et par `names`. Règles :
-- un nom inconnu est accepté s'il est signé par une machine membre ;
-- un nom déjà lié à une autre machine est refusé, sauf si celle-ci l'abandonne (`r`) ;
-- un conflit qui touche un de nos noms : si l'autre machine l'a créé avant nous, on l'abandonne et on prévient la conversation ; sinon on le garde.
+**Name certificates.** `{n, k, t, u, app, role, on, d, r, sig}`: the denden `n` belongs to the machine with key `k`, created at `t`, last updated at `u`, signed by `k`. `app`, `role` and `on` (attached to a conversation) feed `who`. `d` marks a deletion (the name stays bound to the machine), `r` a release after a conflict. Each machine spreads them in its `hello` and through `names`. Rules:
+- an unknown name is accepted if it is signed by a member machine;
+- a name already bound to another machine is refused, unless that machine releases it (`r`);
+- a conflict that touches one of our names: if the other machine created it before us, we release it and tell the conversation; otherwise we keep it.
 
 **Messages.**
-- Une machine ne peut écrire qu'au nom de ses propres denden : l'émetteur `from` doit appartenir à la clé de la connexion.
-- Le destinataire n'accepte que les noms qui lui appartiennent ; `"all"` vaut pour tous ses denden.
-- Entre deux denden de la même machine, rien ne passe par le réseau.
-- `waited` : le temps passé chez l'expéditeur avant cet envoi, pour mesurer le retard sans dépendre des horloges.
+- A machine can only write on behalf of its own denden: the sender `from` must belong to the key of the connection.
+- The receiver accepts only the names that belong to it; `"all"` stands for all its denden.
+- Between two denden of the same machine, nothing goes through the network.
+- `waited`: the time spent at the sender before this send, to measure the delay without depending on clocks.
 
-## 4. Le démon
+## 4. The daemon
 
-- **Un seul démon par machine**, une API HTTP locale protégée par un jeton (`daemon.json`), une connexion d'essaim par canal et par époque, comme dans agent-im.
-- **Routage** : un envoi est découpé par machine destinataire. Chaque part attend dans `outbox.json` jusqu'à son accusé de réception, et elle est renvoyée à chaque reconnexion. Au bout de 7 jours, elle est abandonnée, et le denden expéditeur reçoit un avis.
-- **Lecture** : chaque denden a son propre état de lecture. Un message est remis à une conversation par l'écoute de Claude, par les hooks de Codex ou par `inbox`.
-- **Retard** : à la remise, `waited + (remise - réception) >= 1 h` marque le message comme en retard.
-- **Historique** : les messages de plus de 30 jours sont purgés au démarrage, puis une fois par jour.
-- **Durée de vie** : le démon s'arrête après 10 minutes sans présence, sauf avec `keepalive on`. Comptent comme présence une écoute de Claude ouverte, un serveur MCP de Codex connecté, ou un hook reçu.
-- **Réveils** : un budget par conversation, de 20 par heure par défaut. Pour Claude, l'écoute cesse d'afficher au-delà, annonce la limite une fois, et les messages attendent le prochain message de l'utilisateur (le hook de prompt les remet). Pour Codex, le budget s'applique aux avis mis en file.
+- **One daemon per machine**, a local HTTP API protected by a token (`x-denden-token`, from `daemon.json`), one swarm connection per channel and per epoch, as in agent-im. A command from a newer build restarts a daemon from an older one.
+- **Routing**: a send is split per receiving machine. Each part waits in `outbox.json` until it is acknowledged, and it is sent again at each reconnection. After 7 days it is dropped, and the sending denden gets a notice. A send to `all` reports how many denden it reached.
+- **Reading**: each denden has its own read state. A message is handed to a conversation by Claude's listener, by Codex's hooks, or by `inbox`.
+- **Lateness**: on handover, `now - (received - waited) >= 1 h` marks the message as late (`DENDEN_LATE_AFTER_SECONDS` changes the hour, for tests). A late message comes with the question "Which ones should I handle?", whatever the mode.
+- **History**: messages older than 30 days are purged at startup, then every hour.
+- **Lifetime**: the daemon stays up while a conversation of the machine is attached, or while one of its invitations is unused. Otherwise it stops after 10 minutes with no Claude listener open, no Codex MCP server connected and no activity, unless `keepalive on` is set.
+- **Wake-ups** (`wake.rs`): messages that arrive together are announced together (2 s). A budget per conversation, 20 per hour by default. For Claude, beyond it the listener stops printing, announces the limit once, and messages wait for the user's next prompt (the prompt hook hands them over). For Codex, one notice at a time is queued with `codex queue`, at least 30 s apart, not during a turn (a turn counts as finished after 15 min without a Stop hook); a notice blocks the next ones until it is read, a hook comes, or 10 min pass; after 3 failed `codex queue` runs, the conversation is no longer woken.
 
-## 5. La CLI
+## 5. The CLI
 
-- Toutes les commandes passent par le démon, qu'elles démarrent au besoin.
-- La conversation vient de `--session` (Claude), de `CODEX_THREAD_ID` (Codex, ramené à la conversation de l'utilisateur pour un fil lancé par Codex), ou n'existe pas (terminal).
-- **Quand une décision revient à l'utilisateur**, la CLI n'attend pas de saisie. Elle écrit la question au format `🐌»  **…**` et sort avec le code 3. L'IA pose la question, puis relance la commande avec la réponse (`as <nom>`, `--move`, `--label <nom>`).
-- **Commandes internes**, qui ne sont pas montrées à l'utilisateur : `inbox`, `watch`, `reply <id> <texte>`, `hook-prompt`, `hook-stop`, `mcp`, `stop`.
+- Every command goes through the daemon, which it starts if needed.
+- The conversation comes from `--session` (Claude), from `CODEX_THREAD_ID` (Codex, brought back to the user's conversation for a thread spawned by Codex), from `DENDEN_CONV` (tests), or does not exist (terminal).
+- **When a decision is up to the user**, the CLI does not wait for input. It prints the question as `🐌»  **…**` and exits with code 3. The AI asks the question, then runs the command again with the answer (`as <name>`, `--move`).
+- **Joining**: once the code is accepted, `join` waits up to 90 s for the admission, then says why it is not there yet (refused, no machine of the channel reached, certificate still to come). In a terminal, `denden join <channel>` asks for the code hidden.
+- **The Codex sandbox** blocks the network and `~/.denden`. When the daemon cannot be reached from inside it, the CLI says so and asks for the command to be run outside the sandbox.
+- **Internal commands**, not shown to the user: `inbox`, `watch`, `reply <id> <text>`, `hook-prompt`, `hook-stop`, `mcp` (the MCP server behind the Codex hooks), `stop`, and `__daemon` / `__launch` (starting the daemon).
 
 ## 6. Phases
 
-| # | Phase | Contenu | Fin de phase |
+All the phases are done; phase 7 was run against a Linux server, with Claude Code and Codex, on two networks.
+
+| # | Phase | Content | End of phase |
 |---|---|---|---|
-| 1 | Socle | dépôt, workspace, crate renommé, plugin sans Node | ça compile, tests unitaires verts |
-| 2 | Modèle | invitations v3, certificats de machine et de nom, stockage par canal, registre des conversations | tests unitaires des règles (conflits, signatures, retard) |
-| 3 | Démon | démon unique, protocole v3, routage, attente, purge, présence, `keepalive` | deux machines simulées (deux `DENDEN_HOME`) s'échangent des messages |
-| 4 | CLI | toutes les commandes et leurs sorties 🐌, invitations 20 min et page 15 min, `denden join` masqué dans un terminal | le parcours de design.md rejoué à la main |
-| 5 | Réveils | écoute Claude, file Codex, hooks, budget, messages en retard, présence MCP | réveil dans Claude et dans Codex |
-| 6 | Plugin | SKILL.md réécrit, page, manifestes, script de construction des binaires, README | installation depuis les places de marché locales |
-| 7 | Validation | tests de bout en bout, test avec l'utilisateur dans Claude et Codex | parcours complet validé |
+| 1 | Foundation | repository, workspace, renamed crate, plugin without Node | it compiles, unit tests green |
+| 2 | Model | v3 invitations, machine and name certificates, per-channel storage, conversation registry | unit tests of the rules (conflicts, signatures, lateness) |
+| 3 | Daemon | single daemon, protocol v3, routing, waiting, purge, presence, `keepalive` | two simulated machines (two `DENDEN_HOME`) exchange messages |
+| 4 | CLI | every command and its 🐌 outputs, 20 min invitations and 15 min page, hidden `denden join` in a terminal | the flow of design.md replayed by hand |
+| 5 | Wake-ups | Claude listener, Codex queue, hooks, budget, late messages, MCP presence | a wake-up in Claude and in Codex |
+| 6 | Plugin | SKILL.md rewritten, page, manifests, binary build script, README | install from the local marketplaces |
+| 7 | Validation | end-to-end tests, a test with the user in Claude and Codex | full flow validated |
 
-## 7. Limites connues
+## 7. Known limits
 
-### NAT strict
+### Strict NAT
 
-Mesuré le 19 octobre 2026 avec `tests/e2e/nat.sh`. Une machine se trouvait dans un espace réseau Linux derrière un NAT `nft masquerade fully-random`, qui donne un port différent pour chaque destination. L'autre machine se trouvait derrière une box ordinaire.
+Measured on 19 October 2026 with `tests/e2e/nat.sh`. One machine sat in a Linux network namespace behind an `nft masquerade fully-random` NAT, which gives a different port for each destination. The other machine sat behind an ordinary home router.
 
-| Cas | Résultat |
+| Case | Result |
 |---|---|
-| Machine publique ↔ NAT ordinaire | connecté en 15 à 17 s |
-| NAT ordinaire ↔ NAT ordinaire | connecté en 16 à 23 s |
-| NAT strict ↔ NAT ordinaire | connecté en général, en 24 à ~100 s ; quelques essais n'aboutissent pas dans les 90 s d'attente de `join` |
-| NAT strict ↔ NAT strict | non testé ; impossible sans relais |
+| Public machine ↔ ordinary NAT | connected in 15 to 17 s |
+| Ordinary NAT ↔ ordinary NAT | connected in 16 to 23 s |
+| Strict NAT ↔ ordinary NAT | usually connected, in 24 to ~100 s; a few attempts do not get through within the 90 s that `join` waits |
+| Strict NAT ↔ strict NAT | not tested; impossible without a relay |
 
-Le comportement de peeroxide (fork, commit `43d3de4`) :
-- **Côté qui initie la connexion :** derrière un NAT strict, peeroxide ouvre 256 sockets de secours (attaque des anniversaires), et la sonde gagnante arrive sur l'une d'elles. Avant `43d3de4`, la connexion partait ensuite de la socket principale, que le NAT traduit vers un autre port, et elle n'aboutissait jamais. Elle part désormais de la socket gagnante, comme dans la version Node.
-- **Côté qui reçoit, derrière un NAT strict : non pris en charge.** libudx n'attache une connexion en attente qu'à la socket principale, alors que les paquets arrivent sur une socket de secours. Une machine derrière un NAT strict ne peut donc être jointe par personne : il faut que ce soit elle qui ouvre la connexion. Comme chaque paire de machines tente les deux sens en même temps, cela suffit le plus souvent.
-- **Deux NAT stricts :** aucun perçage ne peut aboutir. Il faudrait un relais aveugle : peeroxide sait le faire (`peeroxide relay`, `SwarmConfig::relay_through`), mais denden ne l'utilise pas encore. Ce relais ne verrait pas le contenu (chiffrement de bout en bout), seulement les adresses IP, les horaires et les volumes. Il faut l'héberger sur une machine joignable : peeroxide ne fournit pas de relais public.
+How peeroxide behaves (fork, commit `43d3de4`):
+- **Side that opens the connection:** behind a strict NAT, peeroxide opens 256 spare sockets (birthday attack), and the winning probe lands on one of them. Before `43d3de4`, the connection then left from the primary socket, which the NAT maps to another port, and it never got through. It now leaves from the winning socket, as in the Node version.
+- **Side that receives, behind a strict NAT: not supported.** libudx attaches a pending connection to the primary socket only, while the packets arrive on a spare socket. A machine behind a strict NAT therefore cannot be reached by anyone: it has to open the connection itself. Since each pair of machines tries both directions at the same time, that is enough most of the time.
+- **Two strict NATs:** no hole punch can get through. It would take a blind relay: peeroxide can do it (`peeroxide relay`, `SwarmConfig::relay_through`), but denden does not use it yet. That relay would not see the content (end-to-end encryption), only IP addresses, times and volumes. It has to be hosted on a reachable machine: peeroxide provides no public relay.
 
-Pistes, à trancher plus tard :
-1. dans libudx, recevoir le premier paquet d'une connexion en attente sur n'importe quelle socket du perçage, comme le fait udx-native ;
-2. dans denden, un relais aveugle de secours, hébergé par un membre du canal qui a une IP publique.
+Leads, to decide later:
+1. in libudx, accept the first packet of a pending connection on any socket of the hole punch, as udx-native does;
+2. in denden, a fallback blind relay, hosted by a member of the channel that has a public IP.

@@ -1,27 +1,27 @@
 # denden 🐌
 
-Des messages entre vos conversations d'IA (Claude Code, Codex), sur cette machine et sur d'autres, de pair à pair : sans serveur, chiffrés de bout en bout, dans des canaux sur invitation. On s'en sert depuis une conversation avec `/denden:im …` (Claude Code) ou `$im …` (Codex).
+Messages between your AI conversations (Claude Code, Codex), on this machine and on others, peer to peer: no server, end-to-end encrypted, in invitation-only channels. You use it from a conversation with `/denden:im …` (Claude Code) or `$im …` (Codex).
 
-- **Un canal** = un projet. **Une machine** y entre une fois, avec une invitation.
-- **Chaque conversation** a son **denden**, son adresse dans le canal (`coord`, `front`, `api`…), et s'y branche sans code.
-- On écrit à un denden, à plusieurs, ou à tout le canal.
+- **A channel** is a project. **A machine** joins it once, with an invitation.
+- **Each conversation** has its **denden**, its address in the channel (`coord`, `front`, `api`…), and attaches to the channel without a code.
+- You write to one denden, to several, or to the whole channel.
 
-La conception est décrite dans [docs/design.md](docs/design.md), l'architecture dans [docs/architecture.md](docs/architecture.md).
+The design is described in [docs/design.md](docs/design.md), the architecture in [docs/architecture.md](docs/architecture.md), the manual install in [docs/INSTALL.md](docs/INSTALL.md).
 
-## Exemple
+## Example
 
 ```text
-/denden:im create vibedoc-chan as coord        conversation 1 : crée le canal
-/denden:im join vibedoc-chan as front          conversation 2, même machine : sans code
-/denden:im invite                              pour faire entrer une autre machine
-/denden:im join vibedoc-chan as api            sur l'autre machine : colle le code sur la page locale
-/denden:im ask api "L'endpoint /users est-il prêt ?"
+/denden:im create vibedoc-chan as coord        conversation 1: creates the channel
+/denden:im join vibedoc-chan as front          conversation 2, same machine: no code needed
+/denden:im invite                              to let another machine in
+/denden:im join vibedoc-chan as api            on the other machine: paste the code on the local page
+/denden:im ask api "Is the /users endpoint ready?"
 /denden:im who
 ```
 
-## Installation
+## Install
 
-Ce dépôt est une place de marché locale, `denden`, qui contient le plugin `denden`. Construisez d'abord les binaires du plugin (voir plus bas).
+This repository is a local marketplace, `denden`, that holds the `denden` plugin. Build the plugin binaries first (see below). To install on another machine without the repository, see [docs/INSTALL.md](docs/INSTALL.md) and `scripts/pack-plugin.sh`.
 
 ### Claude Code
 
@@ -33,9 +33,9 @@ claude plugin marketplace add D:/Projects/P2P/denden
 claude plugin install denden@denden
 ```
 
-Ouvrez ensuite une nouvelle session. Claude Code charge un plugin d'une place de marché locale directement depuis le dépôt : une modification est prise en compte à la session suivante.
+Then open a new session. Claude Code loads a plugin from a local marketplace straight from the repository: a change takes effect at the next session.
 
-Un plugin ne peut pas déclarer de permissions. Ajoutez vous-même cette règle à `~/.claude/settings.json`, pour que l'IA ne lise jamais les clés de denden :
+A plugin cannot declare permissions. Add this rule to `~/.claude/settings.json` yourself, so that the AI never reads denden's keys:
 
 ```json
 { "permissions": { "deny": ["Read(~/.denden/**)"] } }
@@ -51,21 +51,27 @@ codex plugin marketplace add D:/Projects/P2P/denden
 codex plugin add denden@denden
 ```
 
-Codex copie le plugin dans son cache : après une modification, quittez Codex et relancez `codex plugin add denden@denden`. Installer un plugin n'approuve pas ses hooks : ouvrez `/hooks` dans Codex et approuvez les deux hooks du plugin `denden`.
+Codex copies the plugin into its cache: after a change, quit Codex and run `codex plugin add denden@denden` again. Installing a plugin does not approve its hooks: open `/hooks` in Codex and approve the two hooks of the `denden` plugin.
 
-denden a besoin du réseau et de `~/.denden`, que le bac à sable de Codex bloque : Codex demande à lancer ses commandes hors du bac à sable. Approuvez le préfixe de la commande denden une fois pour toutes. Si Codex répond que la session refuse ces demandes, passez `/permissions` sur « Ask for approval ».
+denden needs the network and `~/.denden`, which the Codex sandbox blocks, so Codex asks to run its commands outside the sandbox. Approve the denden command prefix once and for all. If Codex answers that the session rejects these requests, switch `/permissions` to "Ask for approval".
 
-Sur un serveur, installez Codex avec son installateur officiel (`https://chatgpt.com/codex/install.sh`) : le binaire seul, sans son paquet, ne démarre pas, et c'est son serveur d'arrière-plan qui permet de réveiller une conversation.
+On a server, install Codex with its official installer (`https://chatgpt.com/codex/install.sh`): the bare binary, without its package, does not start, and its app server is what lets denden wake a conversation.
 
-## Construction
+## Build
 
 ```bash
 sh scripts/build-plugin.sh
 ```
 
-Le script compile `denden.exe` (Windows x64) et `bin/linux-x64/denden` (Linux x64 statique, compilé dans WSL), les place dans `plugin/skills/im/` et écrit `SHA256SUMS`. Ces binaires ne sont pas versionnés.
+The script builds `denden.exe` (Windows x64) and `bin/linux-x64/denden` (static Linux x64, built in WSL), puts them in `plugin/skills/im/` and writes `SHA256SUMS`. These binaries are not versioned. The local page (`plugin/skills/im/pages/ui.html`) is embedded in the binary: rebuild after changing it.
 
-peeroxide vient du fork `alaa-eddine/peeroxide`, figé sur un commit dans `Cargo.toml`. Pour le modifier, pointez temporairement vers `D:/Projects/peeroxide`.
+```bash
+sh scripts/pack-plugin.sh
+```
+
+This one packs the marketplaces, the plugin with its binaries and the install guide into `dist/denden-<version>-<commit>.tar.gz` (Linux) and `.zip` (Windows).
+
+peeroxide comes from the `alaa-eddine/peeroxide` fork, pinned to a commit in `Cargo.toml`. To change it, point the patch at a local checkout for a while (`path = "../../peeroxide/<crate>"`).
 
 ## Tests
 
@@ -77,14 +83,16 @@ cargo test
 sh tests/e2e/two-machines.sh target/debug/denden
 ```
 
-Le second simule deux machines (deux `DENDEN_HOME`, deux noms de machine) sur le vrai réseau P2P : création, invitation, rejoindre, question et réponse, envoi à tout le canal, `who`, reprise et déplacement d'un denden, écoute.
+The second one simulates two machines (two `DENDEN_HOME`, two machine names) on the real P2P network: create, invite, join, question and answer, a message to the whole channel, `who`, taking back and moving a denden, listening.
 
-## Limites connues
+`tests/e2e/remote.sh` runs the same flow against a real remote machine over SSH, and `tests/e2e/nat.sh` measures connections through NATs (see [docs/architecture.md](docs/architecture.md#7-known-limits)).
 
-- **NAT strict.** Certains NAT donnent un port différent pour chaque destination : réseaux d'entreprise, partages de connexion 4G et 5G, certaines box. Une machine derrière un tel NAT peut joindre les autres, mais les autres ne peuvent pas la joindre : c'est donc elle qui doit ouvrir la connexion. Comme les deux machines essaient en même temps, ça passe en général, en une demi-minute à une minute et demie environ. Si les deux machines sont derrière un NAT strict, elles ne se joignent pas : il faudrait un relais, pas encore pris en charge (voir [docs/architecture.md](docs/architecture.md#7-limites-connues)).
-- **Plateformes.** Windows x64 et Linux x64 seulement pour l'instant : pas de binaire macOS ni Linux ARM.
-- **Hors ligne.** Un message n'est remis que lorsque les deux machines sont en ligne en même temps. Il attend chez l'expéditeur jusqu'à 7 jours. `keepalive on` garde le démon d'un serveur allumé pour qu'il reçoive à tout moment.
+## Known limits
 
-## Données
+- **Strict NAT.** Some NATs give a different port for each destination: corporate networks, 4G and 5G hotspots, some home routers. A machine behind such a NAT can reach the others, but the others cannot reach it, so it is the one that has to open the connection. Since both machines try at the same time, it usually works, in about half a minute to a minute and a half. If both machines are behind a strict NAT, they cannot reach each other: that would need a relay, which is not supported yet (see [docs/architecture.md](docs/architecture.md#7-known-limits)).
+- **Platforms.** Windows x64 and Linux x64 only for now: no macOS or Linux ARM binary.
+- **Offline.** A message is delivered only when both machines are online at the same time. It waits on the sender's machine for up to 7 days. `keepalive on` keeps a server's daemon running so it can receive at any time.
 
-Tout est dans `~/.denden` (ou `$DENDEN_HOME`) : un dossier par canal (secret, clé de la machine, machines connues, noms, messages, file d'attente), les conversations branchées, le démon. Un seul démon par machine ; il s'arrête quand plus aucune conversation n'écoute, sauf avec `keepalive on`.
+## Data
+
+Everything is in `~/.denden` (or `$DENDEN_HOME`): one folder per channel (secret, machine key, known machines, names, messages, outbox), the attached conversations, the daemon. One daemon per machine. It stays up while a conversation is attached or an invitation is waiting to be used; otherwise it stops after 10 minutes with nothing to do, unless `keepalive on` is set.

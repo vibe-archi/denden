@@ -71,7 +71,7 @@ Invitation codes are copied and pasted only on a one-time local page (or typed i
 4. One line for the user: "Click to copy the code, then send it privately", or "Paste the code you received on the page".
 5. When the command finishes, relay its last lines. After a `join`, start listening.
 
-On a server without a browser, `join` says so: the user runs `denden join <channel>` in a separate terminal (outside the AI), types the code there, then tells you; run the same `DENDEN join ...` again.
+On a server without a browser (Linux without a desktop), `join` serves no page: it asks the user (exit code 3) to run `denden join <channel>` in a separate terminal, outside the AI, and to type the code there. Ask it, wait until they say it is done, then run the same `DENDEN join ...` again.
 
 ## Listening
 

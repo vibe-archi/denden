@@ -75,8 +75,8 @@ textarea:focus { border-color: var(--a1); outline: none; }
       used: 'This code was already copied from another page. Create a new invitation.',
       manual: 'Copy it with Ctrl+C (⌘C), then send it privately to the other user.',
       join: (l) => `Join <b>${l}</b>`, paste: 'Paste the invitation code', placeholder: 'denden_…',
-      pasteHint: 'Paste it in the box with Ctrl+V (⌘V).',
-      go: 'Join', invalid: 'Not an invitation code', joining: 'Joining…', joined: (l) => `Joined ${l}`,
+      pasteHint: 'Paste it in the box with Ctrl+V (⌘V), then press Enter.',
+      go: 'Join · or press Enter', invalid: 'Not an invitation code', joining: 'Joining…', joined: (l) => `Joined ${l}`,
       back: 'Go back to your conversation: it is connecting.',
       closes: 'Closes in', closed: 'This page is closed.', gone: 'This page has expired. Ask your conversation for a new one.',
       network: 'The page is no longer active. Ask your conversation for a new one.'
@@ -87,8 +87,8 @@ textarea:focus { border-color: var(--a1); outline: none; }
       used: 'Ce code a déjà été copié depuis une autre page. Créez une nouvelle invitation.',
       manual: 'Copiez-le avec Ctrl+C (⌘C), puis envoyez-le en privé à l\'autre utilisateur.',
       join: (l) => `Rejoindre <b>${l}</b>`, paste: 'Coller le code d\'invitation', placeholder: 'denden_…',
-      pasteHint: 'Collez-le dans le cadre avec Ctrl+V (⌘V).',
-      go: 'Rejoindre', invalid: 'Ce n\'est pas un code d\'invitation', joining: 'Connexion…', joined: (l) => `Canal ${l} rejoint`,
+      pasteHint: 'Collez-le dans le cadre avec Ctrl+V (⌘V), puis appuyez sur Entrée.',
+      go: 'Rejoindre · ou appuyez sur Entrée', invalid: 'Ce n\'est pas un code d\'invitation', joining: 'Connexion…', joined: (l) => `Canal ${l} rejoint`,
       back: 'Revenez à votre conversation : elle se connecte.',
       closes: 'Fermeture dans', closed: 'Cette page est fermée.', gone: 'Cette page a expiré. Demandez-en une nouvelle à votre conversation.',
       network: 'Cette page n\'est plus active. Demandez-en une nouvelle à votre conversation.'
@@ -192,8 +192,15 @@ textarea:focus { border-color: var(--a1); outline: none; }
       b.disabled = !ok; b.textContent = ok ? t.go : t.invalid
     }
     box.addEventListener('input', state)
+    // Ctrl+V then Enter: no need to reach for the mouse. Enter never adds a line to the code.
+    box.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return
+      e.preventDefault()
+      if (value() && !b.disabled) b.click()
+    })
     state(); box.focus()
     b.onclick = async () => {
+      if (b.disabled) return
       if (!value()) {
         try { box.value = (await navigator.clipboard.readText()).trim() } catch {}
         state()
@@ -206,7 +213,7 @@ textarea:focus { border-color: var(--a1); outline: none; }
         box.remove()
         b.className = 'btn done'; b.innerHTML = `${check}<span>${esc(t.joined(r.label || ''))}</span>`
         $('next').textContent = t.back
-        soon(10)
+        soon(60)
       } catch (x) {
         state()
         $('next').className = 'next err'; $('next').textContent = x.status ? x.message : t.network

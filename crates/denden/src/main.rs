@@ -572,6 +572,10 @@ fn cmd_join(pos: &[String], opts: &Opts) {
         if let Err(why) = wait_admission(&label, 90) {
             fail(&why);
         }
+    } else if no_display() {
+        // A server without a desktop: a page on its 127.0.0.1 is out of the user's reach.
+        println!("{}", info(&format!("{} is not in {label} yet, and has no browser for the local page", machine_name())));
+        ask_user(&format!("In a separate terminal on {}, outside the AI, run {} join {label} and type the invitation code there. Tell me when it is done.", machine_name(), own_command()));
     } else {
         // Not in the channel yet: the invitation code, on a local page (never in the conversation).
         let no_browser = flag(opts, "no-browser");
@@ -610,6 +614,20 @@ fn cmd_join(pos: &[String], opts: &Opts) {
     let r = call("POST", "/attach", Some(&body), 20000);
     handle_attach(r, &h, &label, flag(opts, "move"));
     deny_rule_note(&h);
+}
+
+/// A Linux machine without a desktop (a server over SSH): no browser can show a local page there.
+fn no_display() -> bool {
+    cfg!(all(unix, not(target_os = "macos"))) && ["DISPLAY", "WAYLAND_DISPLAY"].iter().all(|v| std::env::var_os(v).is_none_or(|x| x.is_empty()))
+}
+
+/// How the user runs denden in their own terminal: the plugin's launcher (skills/im/denden, two
+/// levels above bin/linux-x64/denden) when there is one, else this binary.
+fn own_command() -> String {
+    let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("denden"));
+    let launcher = exe.parent().and_then(|p| p.parent()).and_then(|p| p.parent()).map(|d| d.join("denden"));
+    let path = launcher.filter(|l| l.is_file() && *l != exe).unwrap_or(exe).display().to_string();
+    if path.contains(' ') { format!("\"{path}\"") } else { path }
 }
 
 /// `denden join <channel>` in the user's own terminal: the machine joins; any conversation of it
