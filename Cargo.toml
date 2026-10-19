@@ -11,11 +11,13 @@ strip = true
 
 # peeroxide 1.7.3 with the Node-interop fixes (upstream PR #31) plus what denden needs on top:
 # reconnect after a dropped connection, a newer connection replaces a stale one, bounded connect
-# attempts, and a Windows UDP fix in libudx. Branch im-rust of the fork, pinned to one commit so every
-# build uses exactly this source. Back to crates.io once upstream releases these fixes.
+# attempts, a Windows UDP fix in libudx, and hole punching through a NAT that randomizes ports
+# (connect from the socket the winning probe reached). Branch im-rust of the fork, pinned to one
+# commit so every build uses exactly this source. Back to crates.io once upstream releases these.
 # To work on peeroxide locally, temporarily replace `git` + `rev` with
-# `path = "D:/Projects/peeroxide/<crate>"`, then push to the fork and bump `rev`.
+# `path = "../../peeroxide/<crate>"` (D:/Projects/peeroxide, the same path from WSL), then push
+# to the fork and bump `rev`.
 [patch.crates-io]
-peeroxide = { git = "https://github.com/alaa-eddine/peeroxide.git", rev = "4864682bfa3d02481bb7d4f6631053a32a8f1696" }
-peeroxide-dht = { git = "https://github.com/alaa-eddine/peeroxide.git", rev = "4864682bfa3d02481bb7d4f6631053a32a8f1696" }
-libudx = { git = "https://github.com/alaa-eddine/peeroxide.git", rev = "4864682bfa3d02481bb7d4f6631053a32a8f1696" }
+peeroxide = { git = "https://github.com/alaa-eddine/peeroxide.git", rev = "43d3de47ae95c163237fa7b97273d22afcacfbc8" }
+peeroxide-dht = { git = "https://github.com/alaa-eddine/peeroxide.git", rev = "43d3de47ae95c163237fa7b97273d22afcacfbc8" }
+libudx = { git = "https://github.com/alaa-eddine/peeroxide.git", rev = "43d3de47ae95c163237fa7b97273d22afcacfbc8" }

@@ -21,6 +21,9 @@ expect() {
   if printf '%s' "$3" | grep -q -- "$2"; then echo "   ok: $1"; else echo "   FAIL: $1 (wanted: $2)"; fails=$((fails + 1)); fi
 }
 
+# The remote test folder starts empty: a channel left by an earlier run would be joined instead.
+$SSH "$RB stop; rm -rf ~/denden-test/home/channels ~/denden-test/home/conversations.json ~/denden-test/home/wakes.json" > /dev/null 2>&1
+
 step "this computer: create xnet, attach coord"
 out=$(a create xnet as coord --session local-coord); echo "$out"
 expect "attached" "This conversation is coord in xnet" "$out"

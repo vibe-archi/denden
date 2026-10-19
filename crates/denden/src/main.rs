@@ -569,7 +569,7 @@ fn cmd_join(pos: &[String], opts: &Opts) {
     let r = call("POST", "/attach", Some(&body), 20000);
     let Some(r) = handle_attach(r, &h, &label, flag(opts, "move")) else { return deny_rule_note(&h) };
     if vs(&r, "need") == "admission" {
-        if let Err(why) = wait_admission(&label, 45) {
+        if let Err(why) = wait_admission(&label, 90) {
             fail(&why);
         }
     } else {
@@ -603,7 +603,7 @@ fn cmd_join(pos: &[String], opts: &Opts) {
             }
             Err(_) => fail(&format!("The page closed without an invitation code · run /denden:im join {label} again when you have it")),
         }
-        if let Err(why) = wait_admission(&label, 45) {
+        if let Err(why) = wait_admission(&label, 90) {
             fail(&why);
         }
     }
@@ -627,7 +627,7 @@ fn terminal_join(label: &str) {
         Ok(j) if truthy(j.get("already")) => println!("This machine is already in this channel (here: {}).", vs(&j, "label")),
         Ok(j) => {
             println!("Joining {label}, invited by {} [{}]...", vs(&j, "inviter"), vs(&j, "inviterFp"));
-            match wait_admission(label, 45) {
+            match wait_admission(label, 90) {
                 Ok(()) => println!("{} joined {label}. Attach a conversation with /denden:im join {label} as <name>.", machine_name()),
                 Err(why) => println!("{why}"),
             }

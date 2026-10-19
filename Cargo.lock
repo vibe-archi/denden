@@ -355,7 +355,7 @@ checksum = "ce5d3ddc6d3fa000eb1536d85e147bfe31aacaba692ed6a876f95cb7c855be78"
 [[package]]
 name = "libudx"
 version = "1.7.3"
-source = "git+https://github.com/alaa-eddine/peeroxide.git?rev=4864682bfa3d02481bb7d4f6631053a32a8f1696#4864682bfa3d02481bb7d4f6631053a32a8f1696"
+source = "git+https://github.com/alaa-eddine/peeroxide.git?rev=43d3de47ae95c163237fa7b97273d22afcacfbc8#43d3de47ae95c163237fa7b97273d22afcacfbc8"
 dependencies = [
  "thiserror",
  "tokio",
@@ -450,7 +450,7 @@ dependencies = [
 [[package]]
 name = "peeroxide"
 version = "1.7.3"
-source = "git+https://github.com/alaa-eddine/peeroxide.git?rev=4864682bfa3d02481bb7d4f6631053a32a8f1696#4864682bfa3d02481bb7d4f6631053a32a8f1696"
+source = "git+https://github.com/alaa-eddine/peeroxide.git?rev=43d3de47ae95c163237fa7b97273d22afcacfbc8#43d3de47ae95c163237fa7b97273d22afcacfbc8"
 dependencies = [
  "libudx",
  "peeroxide-dht",
@@ -463,7 +463,7 @@ dependencies = [
 [[package]]
 name = "peeroxide-dht"
 version = "1.7.3"
-source = "git+https://github.com/alaa-eddine/peeroxide.git?rev=4864682bfa3d02481bb7d4f6631053a32a8f1696#4864682bfa3d02481bb7d4f6631053a32a8f1696"
+source = "git+https://github.com/alaa-eddine/peeroxide.git?rev=43d3de47ae95c163237fa7b97273d22afcacfbc8#43d3de47ae95c163237fa7b97273d22afcacfbc8"
 dependencies = [
  "blake2",
  "chacha20",
