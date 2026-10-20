@@ -2,7 +2,7 @@
 // member vouches for a machine key), and name certificates (a machine owns a denden name). Pure
 // functions over JSON values, so the daemon's rules can be tested without a network.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use ed25519_dalek::SigningKey;
 use serde_json::{Value, json};
@@ -325,6 +325,52 @@ impl Names {
     }
 }
 
+// ---------- names claimed from their machine ----------
+
+/// A claim that reaches us this long after we showed its machine the owner's certificate did not
+/// cross it: that machine knew whose name it was.
+pub const KNEW_AFTER: u64 = 60 * 1000;
+
+/// Impersonation evidence in one channel, for the daemon's run. A machine that created a name
+/// without seeing it taken gives it up as soon as it sees an earlier creation. So a machine that,
+/// on its own connection, still claims a name created before its own, after we showed it the owner,
+/// is impersonating that owner. Claims that win the conflict rule, crossings, claims relayed by
+/// another machine and names nobody uses any more are not reported.
+#[derive(Default, Debug)]
+pub struct Claims {
+    /// (machine key, name) -> (owner key, when we first showed that machine this binding).
+    shown: BTreeMap<(String, String), (String, u64)>,
+    /// (machine key, name) already reported.
+    reported: BTreeSet<(String, String)>,
+}
+
+impl Claims {
+    /// We showed machine `to` that the name `n` is in use by machine `owner` (our hello, or a name
+    /// certificate sent on to the machines online).
+    pub fn showed(&mut self, to: &str, n: &str, owner: &str, at: u64) {
+        if to == owner {
+            return;
+        }
+        let e = self.shown.entry((to.to_string(), n.to_string())).or_insert_with(|| (owner.to_string(), at));
+        if e.0 != owner {
+            *e = (owner.to_string(), at);
+        }
+    }
+
+    /// A claim refused by the table, received from machine `via` at `now`: the owner's key when it
+    /// is impersonation reported for the first time.
+    pub fn impersonation(&mut self, names: &Names, claim: &NameCert, via: &str, now: u64) -> Option<String> {
+        let owner = names.get(&claim.n).filter(|o| o.active() && o.k != claim.k)?;
+        let earlier = (owner.t, owner.k.as_str()) < (claim.t, claim.k.as_str());
+        let id = (claim.k.clone(), claim.n.clone());
+        let knew = self.shown.get(&id).is_some_and(|(k, at)| *k == owner.k && now >= at.saturating_add(KNEW_AFTER));
+        if via != claim.k || !claim.active() || !earlier || !knew || !self.reported.insert(id) {
+            return None;
+        }
+        Some(owner.k.clone())
+    }
+}
+
 // ---------- late messages ----------
 
 /// A message handed to a conversation this long after it was first sent is late: never acted on
@@ -464,6 +510,67 @@ mod tests {
         let mut names = Names::default();
         names.offer(nc(&me_sk, &me, "bob", 200, 200, true, false), &me);
         assert_eq!(names.offer(nc(&b_sk, &b, "bob", 100, 100, false, false), &me), Offer::Refused);
+    }
+
+    #[test]
+    fn a_claim_from_a_machine_that_knew_is_reported_once() {
+        let (a_sk, a) = key(1);
+        let (b_sk, b) = key(2);
+        let (me_sk, me) = key(9);
+        let mut names = Names::default();
+        names.offer(nc(&a_sk, &a, "alice", 100, 100, false, false), &me);
+        names.offer(nc(&me_sk, &me, "coord", 100, 100, false, false), &me);
+        let mut claims = Claims::default();
+        claims.showed(&b, "alice", &a, 1000);
+        claims.showed(&b, "coord", &me, 1000);
+        claims.showed(&b, "alice", &a, 5000); // shown again: it knew since the first time
+        let knew = 1000 + KNEW_AFTER;
+        let alice = nc(&b_sk, &b, "alice", 2000, 2000, false, false);
+        assert_eq!(names.offer(alice.clone(), &me), Offer::Refused);
+        assert_eq!(claims.impersonation(&names, &alice, &b, knew - 1), None, "it may have crossed what we showed");
+        assert_eq!(claims.impersonation(&names, &alice, &b, knew), Some(a.clone()));
+        assert_eq!(claims.impersonation(&names, &alice, &b, knew + 1), None, "once per run");
+        let later_state = nc(&b_sk, &b, "alice", 2000, 9000, false, false);
+        assert_eq!(claims.impersonation(&names, &later_state, &b, knew + 9000), None, "once per machine and name");
+        // One of our own names, created before theirs.
+        let coord = nc(&b_sk, &b, "coord", 3000, 3000, false, false);
+        assert_eq!(names.offer(coord.clone(), &me), Offer::Refused);
+        assert_eq!(claims.impersonation(&names, &coord, &b, knew), Some(me.clone()));
+    }
+
+    #[test]
+    fn legitimate_conflicts_are_not_reported() {
+        let (a_sk, a) = key(1);
+        let (b_sk, b) = key(2);
+        let (_, n) = key(3);
+        let (me_sk, me) = key(9);
+        let mut names = Names::default();
+        names.offer(nc(&a_sk, &a, "alice", 100, 100, false, false), &me);
+        names.offer(nc(&a_sk, &a, "gone", 100, 300, true, false), &me);
+        names.offer(nc(&a_sk, &a, "moved", 100, 100, false, false), &me);
+        names.offer(nc(&a_sk, &a, "unseen", 100, 100, false, false), &me);
+        names.offer(nc(&me_sk, &me, "coord", 200, 200, false, false), &me);
+        let mut claims = Claims::default();
+        for x in ["alice", "gone", "coord"] {
+            claims.showed(&b, x, names.get(x).map(|c| c.k.as_str()).unwrap(), 1000);
+        }
+        claims.showed(&b, "moved", &n, 1000); // owned by n when we showed it, by a now
+        let now = 1000 + KNEW_AFTER;
+        let mut check = |c: NameCert, via: &str, why: &str| {
+            assert_ne!(names.clone().offer(c.clone(), &me), Offer::Accepted, "{why}");
+            assert_eq!(claims.impersonation(&names, &c, via, now), None, "{why}");
+        };
+        check(nc(&b_sk, &b, "alice", 50, 50, false, false), &b, "created before the owner: it wins once the owner sees it");
+        check(nc(&b_sk, &b, "alice", 2000, 2000, false, false), &n, "relayed: another machine has not seen the release yet");
+        check(nc(&b_sk, &b, "alice", 2000, 2000, true, false), &b, "a deletion");
+        check(nc(&b_sk, &b, "alice", 2000, 2000, false, true), &b, "a release");
+        check(nc(&b_sk, &b, "gone", 2000, 2000, false, false), &b, "nobody uses the name any more");
+        check(nc(&b_sk, &b, "moved", 2000, 2000, false, false), &b, "we never showed it this owner");
+        check(nc(&b_sk, &b, "unseen", 2000, 2000, false, false), &b, "a name we never showed it");
+        // Created before ours: we lose it (4.12), nothing to report.
+        let earlier = nc(&b_sk, &b, "coord", 150, 150, false, false);
+        assert_eq!(claims.impersonation(&names, &earlier, &b, now), None);
+        assert_eq!(names.offer(earlier, &me), Offer::Lost);
     }
 
     #[test]

@@ -19,7 +19,7 @@ use serde_json::{Map, Value, json};
 use tokio::sync::{Notify, mpsc};
 
 use crate::core::*;
-use crate::daemon::{AckResult, Effect, Live, Shared, State, SwarmSlot, notify, run_effects, s};
+use crate::daemon::{AckResult, Chan, Effect, Live, Shared, State, SwarmSlot, notify, run_effects, s};
 use crate::dlog as log;
 use crate::proto::*;
 
@@ -40,15 +40,21 @@ fn send_to(st: &State, conn: u64, frame: &Value) {
     }
 }
 
-/// A frame to every machine online in channel `cid`.
-pub fn broadcast(st: &State, cid: &str, frame: &Value) {
-    broadcast_except(st, cid, frame, None);
-}
-
-fn broadcast_except(st: &State, cid: &str, frame: &Value, skip: Option<u64>) {
-    let Some(c) = st.chans.get(cid) else { return };
-    for &conn in c.peers.values().filter(|c| Some(**c) != skip) {
-        send_to(st, conn, frame);
+/// Name certificates to every machine online in channel `cid`, except the one on `skip`. The names
+/// in use each machine was shown are kept as impersonation evidence.
+pub fn send_names(st: &mut State, cid: &str, certs: &[NameCert], skip: Option<u64>) {
+    let Some(c) = st.chans.get_mut(cid) else { return };
+    let now = now_ms();
+    let mut conns = Vec::new();
+    for (key, &conn) in c.peers.iter().filter(|(_, c)| Some(**c) != skip) {
+        conns.push(conn);
+        for cert in certs.iter().filter(|x| x.active()) {
+            c.claims.showed(key, &cert.n, &cert.k, now);
+        }
+    }
+    let frame = json!({ "t": "names", "names": certs.iter().map(NameCert::to_json).collect::<Vec<_>>() });
+    for conn in conns {
+        send_to(st, conn, &frame);
     }
 }
 
@@ -88,10 +94,11 @@ fn refuse(st: &State, conn: u64, who: &str, error: &str, why: &str, fx: &mut Vec
 
 // ---------- hello ----------
 
-fn send_hello(st: &State, conn: u64) {
+fn send_hello(st: &mut State, conn: u64) {
     let Some(l) = st.live.get(&conn) else { return };
     let Some(c) = st.chans.get(&l.cid) else { return };
     let ch = &c.ch;
+    let shown: Vec<(String, String)> = ch.names.map.values().take(MAX_GOSSIP).filter(|x| x.active()).map(|x| (x.n.clone(), x.k.clone())).collect();
     let machine = ch.machine();
     let sig = sign(&ch.sk, &frame(&[b"hello", &ch.keys.id, &l.local_t, &l.remote_t, machine.as_bytes(), &hex::decode(&ch.me).unwrap_or_default()]));
     let members: Vec<Value> = ch
@@ -116,6 +123,9 @@ fn send_hello(st: &State, conn: u64) {
         hello["inv"] = json!(join_proof(&token, &ch.keys.id, &l.local_t, &l.remote_t, &ch.me));
     }
     send_to(st, conn, &hello);
+    if let Some(l) = st.live.get_mut(&conn) {
+        (l.shown, l.hello_at) = (shown, now_ms());
+    }
 }
 
 /// A single-use invitation of ours, presented by machine `key` on this stream.
@@ -194,8 +204,10 @@ fn on_hello(st: &mut State, conn: u64, f: &Value, fx: &mut Vec<Effect>) {
     }
     c.ch.save_members();
     c.peers.insert(key.clone(), conn);
+    let (mut shown, mut hello_at) = (Vec::new(), 0);
     if let Some(l) = st.live.get_mut(&conn) {
         l.key = Some(key.clone());
+        (shown, hello_at) = (std::mem::take(&mut l.shown), l.hello_at);
     }
     let c = &st.chans[&cid];
     if truthy(f.get("needCert")) && c.ch.is_member() {
@@ -206,6 +218,12 @@ fn on_hello(st: &mut State, conn: u64, f: &Value, fx: &mut Vec<Effect>) {
     }
     log!("{label}: online: {who} ({how})");
     on_names(st, &cid, conn, f.get("names"));
+    // Our hello crossed theirs: what it showed them only counts against what they send later.
+    if let Some(c) = st.chans.get_mut(&cid) {
+        for (n, owner) in &shown {
+            c.claims.showed(&key, n, owner, hello_at);
+        }
+    }
     flush_outbox(st, &cid, &key, conn);
     if how != "known" {
         let fp = fmt_fp(&fingerprint_hex(&key)[..8]);
@@ -226,12 +244,16 @@ fn l_epoch(st: &State, conn: u64) -> u64 {
 // ---------- names ----------
 
 /// Name certificates from a peer. New ones go on to the other machines online; a conflict lost
-/// over one of our names releases it and tells its conversation.
+/// over one of our names releases it and tells its conversation; a name of another machine claimed
+/// by a machine that knew is reported to the conversations of the channel.
 fn on_names(st: &mut State, cid: &str, from_conn: u64, list: Option<&Value>) {
+    let via = st.live.get(&from_conn).and_then(|l| l.key.clone()).unwrap_or_default();
     let Some(c) = st.chans.get_mut(cid) else { return };
     let me = c.ch.me.clone();
-    let mut fresh: Vec<Value> = Vec::new();
+    let now = now_ms();
+    let mut fresh: Vec<NameCert> = Vec::new();
     let mut lost: Vec<NameCert> = Vec::new();
+    let mut claimed: Vec<(String, String)> = Vec::new();
     for v in list.and_then(Value::as_array).into_iter().flatten().take(MAX_GOSSIP) {
         let Some(cert) = NameCert::from_json(&c.ch.keys.id, v) else { continue };
         if cert.k == me || !c.ch.knows(&cert.k) {
@@ -239,40 +261,68 @@ fn on_names(st: &mut State, cid: &str, from_conn: u64, list: Option<&Value>) {
         }
         let mine = c.ch.names.get(&cert.n).filter(|x| x.k == me).cloned();
         match c.ch.names.offer(cert.clone(), &me) {
-            Offer::Accepted => fresh.push(cert.to_json()),
+            Offer::Accepted => fresh.push(cert),
             Offer::Lost => {
                 if let Some(m) = mine {
                     lost.push(m);
                 }
-                fresh.push(cert.to_json());
+                fresh.push(cert);
             }
-            Offer::Same | Offer::Refused => {}
+            Offer::Refused => {
+                if let Some(owner) = c.claims.impersonation(&c.ch.names, &cert, &via, now) {
+                    claimed.push((cert.n, owner));
+                }
+            }
+            Offer::Same => {}
         }
+    }
+    if !claimed.is_empty() {
+        let text = claim_alert(c, &via, &claimed);
+        log!("{}: {}", c.ch.label(), text.trim_start_matches("⚠ "));
+        st.note_all(cid, &text, true, true);
     }
     if fresh.is_empty() {
         return;
     }
+    let c = st.chans.get_mut(cid).unwrap();
+    let label = c.ch.label();
     if c.ch.cfg.remove("knownNames").is_some() {
         c.ch.save_cfg();
     }
-    let now = now_ms();
-    let mut out: Vec<Value> = Vec::new();
-    let label = c.ch.label();
+    let mut out: Vec<NameCert> = Vec::new();
     let mut alerts = Vec::new();
     for m in lost {
         // Theirs is older: ours is released, so the machines that saw ours first take theirs.
-        let release = c.ch.sign_name(NameCert { r: true, on: false, ..m.clone() }, now.max(m.u + 1));
-        out.push(release.to_json());
+        out.push(c.ch.sign_name(NameCert { r: true, on: false, ..m.clone() }, now.max(m.u + 1)));
         log!("{label}: lost the name {} to an earlier creation on another machine", m.n);
         alerts.push(m.n.clone());
     }
     out.extend(fresh);
     c.ch.save_names();
-    broadcast_except(st, cid, &json!({ "t": "names", "names": out }), Some(from_conn));
+    send_names(st, cid, &out, Some(from_conn));
     for n in alerts {
         st.note(cid, &n, &format!("⚠ {n} already existed in {label} on another machine · your messages no longer reach the others · choose another name: /denden:im join {label} as {n}-2"), true, false);
     }
     notify(st);
+}
+
+/// One line for the names (name, owner key) that machine `key` claimed from their owners.
+fn claim_alert(c: &Chan, key: &str, claimed: &[(String, String)]) -> String {
+    let fp = fmt_fp(&fingerprint_hex(key)[..8]);
+    let mut names: Vec<&str> = claimed.iter().take(5).map(|(n, _)| n.as_str()).collect();
+    let more = format!("{} more", claimed.len().saturating_sub(5));
+    if claimed.len() > 5 {
+        names.push(&more);
+    }
+    let mut owners: Vec<String> = Vec::new();
+    for (_, k) in claimed {
+        let o = if *k == c.ch.me { "this machine".to_string() } else { c.ch.members.display(k) };
+        if !owners.contains(&o) {
+            owners.push(o);
+        }
+    }
+    let verb = if claimed.len() == 1 { "belongs" } else { "belong" };
+    format!("⚠ {} [{fp}] claimed {}, which {verb} to {} in {}: refused", c.ch.members.name_of(key), names.join(", "), owners.join(", "), c.ch.label())
 }
 
 // ---------- frames ----------
@@ -498,7 +548,7 @@ async fn on_connection(shared: Shared, cid: String, conn: SwarmConnection, epoch
         let auth = st.chans[&cid].ch.keys.auth;
         st.live.insert(
             id,
-            Live { cid: cid.clone(), key: None, send: tx.clone(), kill: killer.clone(), epoch, local_t, remote_t, authed: false, window_start: now_ms(), frame_count: 0 },
+            Live { cid: cid.clone(), key: None, send: tx.clone(), kill: killer.clone(), epoch, local_t, remote_t, authed: false, window_start: now_ms(), frame_count: 0, shown: Vec::new(), hello_at: 0 },
         );
         let proof = b64u(&hmac(&auth, &frame(&[b"auth", &local_t, &remote_t])));
         send_to(&st, id, &json!({ "t": "auth", "v": PROTO_VERSION, "proof": proof }));

@@ -56,6 +56,10 @@ pub struct Live {
     pub authed: bool,
     pub window_start: u64,
     pub frame_count: u32,
+    /// The names in use our hello carried (name, owner key), and when it left: what the machine
+    /// was shown, kept once its hello tells us who it is.
+    pub shown: Vec<(String, String)>,
+    pub hello_at: u64,
 }
 
 pub struct SwarmSlot {
@@ -76,6 +80,8 @@ pub struct Chan {
     pub buckets: HashMap<String, (f64, u64)>,
     /// The last refusal we got, and when: shown while this machine waits to be admitted.
     pub last_refusal: Option<(String, u64)>,
+    /// Names of other machines claimed by a machine that knew: reported once per run.
+    pub claims: Claims,
 }
 
 pub struct Watcher {
@@ -210,7 +216,7 @@ impl State {
         let me = c.ch.me.clone();
         c.ch.names.offer(cert.clone(), &me);
         c.ch.save_names();
-        net::broadcast(self, cid, &json!({ "t": "names", "names": [cert.to_json()] }));
+        net::send_names(self, cid, &[cert], None);
     }
 }
 
@@ -620,7 +626,7 @@ fn start_channel(shared: &Shared, ch: Channel) {
     let cid = ch.cid.clone();
     {
         let mut st = shared.lock().unwrap();
-        st.chans.insert(cid.clone(), Chan { ch, swarms: BTreeMap::new(), announced: false, peers: HashMap::new(), banned_t: HashSet::new(), refused_by: HashMap::new(), buckets: HashMap::new(), last_refusal: None });
+        st.chans.insert(cid.clone(), Chan { ch, swarms: BTreeMap::new(), announced: false, peers: HashMap::new(), banned_t: HashSet::new(), refused_by: HashMap::new(), buckets: HashMap::new(), last_refusal: None, claims: Claims::default() });
     }
     net::reconcile(shared);
 }
