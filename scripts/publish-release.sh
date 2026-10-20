@@ -1,7 +1,7 @@
 #!/bin/sh
 # Publishes a version of the plugin as users install it from GitHub: a commit on the local
 # `release` branch (and the tag v<version>) with the marketplaces, the plugin and its binaries,
-# the docs and the README. main keeps the sources only; the binaries are build outputs there.
+# the docs, the README and the license. main keeps the sources only; the binaries are build outputs there.
 #   claude plugin marketplace add vibe-archi/denden@release
 #   codex plugin marketplace add vibe-archi/denden@release
 # Run from Git Bash after scripts/build-plugin.sh, with the sources committed. It pushes nothing:
@@ -13,7 +13,7 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root"
 skill=plugin/skills/im
 SOURCES="crates Cargo.toml Cargo.lock plugin/skills/im/pages"
-SHIPPED=".gitattributes .claude-plugin .agents plugin docs README.md"
+SHIPPED=".gitattributes .claude-plugin .agents plugin docs README.md LICENSE"
 
 for f in "$skill/denden.exe" "$skill/bin/linux-x64/denden" "$skill/SHA256SUMS" "$skill/SOURCE"; do
   [ -f "$f" ] || { echo "missing $f: run sh scripts/build-plugin.sh first" >&2; exit 1; }
