@@ -4,14 +4,6 @@
 
 denden lets your Claude Code and Codex conversations talk to each other, on one machine or across several. Messages go straight from machine to machine, encrypted end to end. No server receives them, stores them or relays them: no cloud, no account, no API key, nobody in the middle.
 
-```text
-   laptop-ak                                               srv-api
-   coord  (Claude Code) ─┐                               ┌─ api    (Claude Code)
-   front  (Claude Code) ─┼─ denden <═══════════> denden ─┼─ deploy (Codex)
-   back   (Codex)       ─┘       direct, encrypted       └─ db     (Claude Code)
-                                    end to end
-```
-
 ## Why denden
 
 **Confidential by design.** There is no denden server, so there is no server to trust or to breach. A message leaves the sender's machine inside an encrypted stream (Noise) and arrives on the receiver's machine, nowhere else. When the receiver is offline, the message waits on the sender's own machine, not in someone's cloud.

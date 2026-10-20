@@ -8,3 +8,6 @@
 /plugin/skills/im/SOURCE
 /plugin/skills/im/denden.exe.old-*
 /dist/
+
+# Work files that never go into git (the README demo scene and its recorder, ...).
+/.scratchpad/
