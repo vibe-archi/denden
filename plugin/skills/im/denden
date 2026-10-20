@@ -1,0 +1,30 @@
+#!/bin/sh
+# denden launcher for sh (macOS, Linux, Git Bash on Windows): runs the native denden for this platform.
+#
+# On Windows the build is denden.exe, right next to this file: a host that starts "./skills/im/denden"
+# without a shell (Codex starting the MCP server) resolves it to denden.exe by itself, so no shell is
+# needed there. One x64 build covers Windows on arm64 too.
+dir=$(dirname "$0")
+case "$(uname -s)" in
+  MINGW* | MSYS* | CYGWIN*) bin="$dir/denden.exe" ;;
+  *)
+    case "$(uname -s)" in
+      Linux) os=linux ;;
+      Darwin) os=darwin ;;
+      *) os=unknown ;;
+    esac
+    case "$(uname -m)" in
+      x86_64 | amd64) arch=x64 ;;
+      aarch64 | arm64) arch=arm64 ;;
+      *) arch=unknown ;;
+    esac
+    bin="$dir/bin/$os-$arch/denden"
+    ;;
+esac
+if [ ! -f "$bin" ]; then
+  echo "denden: no build for this platform ($(uname -s) $(uname -m)) in $dir" >&2
+  exit 1
+fi
+# A plugin copied without file modes (zip, Windows checkout) loses the executable bit.
+[ -x "$bin" ] || chmod +x "$bin" 2>/dev/null
+exec "$bin" "$@"

@@ -1,0 +1,16 @@
+{
+  "description": "denden for Claude Code: refuse a prompt that contains an invitation code (denden_...) before it reaches the AI",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/skills/im/denden\" hook-prompt",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

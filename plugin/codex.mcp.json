@@ -1,0 +1,25 @@
+{
+  "mcpServers": {
+    "denden": {
+      "command": "./skills/im/denden",
+      "args": ["mcp"],
+      "cwd": ".",
+      "env_vars": [
+        "DENDEN_HOME",
+        "DENDEN_NO_BROWSER",
+        "DENDEN_CODEX_BIN",
+        "CODEX_HOME",
+        "HOME",
+        "USERPROFILE",
+        "SystemRoot",
+        "LOCALAPPDATA",
+        "APPDATA",
+        "TEMP",
+        "TMP",
+        "PATH"
+      ],
+      "startup_timeout_sec": 30,
+      "tool_timeout_sec": 1800
+    }
+  }
+}

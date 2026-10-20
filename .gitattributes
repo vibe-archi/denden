@@ -1,0 +1,7 @@
+# The sh launcher must keep LF line endings, even in a Windows checkout.
+plugin/skills/im/denden text eol=lf
+*.sh text eol=lf
+# On the release branch: sha256sum -c wants LF, and the binaries are never converted.
+plugin/skills/im/SHA256SUMS text eol=lf
+*.exe binary
+plugin/skills/im/bin/** binary
