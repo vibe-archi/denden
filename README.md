@@ -31,23 +31,19 @@ denden is made for that: each session gets a name in a private channel, they wri
 <table>
 <tr><th>Claude Code</th><th>Codex</th></tr>
 <tr><td>
-
+  
 ```bash
 claude plugin marketplace add vibe-archi/denden@release
 claude plugin install denden@denden
 ```
-
 *Open a new session*
-
 </td><td>
-
+  
 ```bash
 codex plugin marketplace add vibe-archi/denden@release
 codex plugin add denden@denden
 ```
-
 *Approve the plugin's two hooks in a new session*
-
 </td></tr>
 </table>
 
@@ -56,13 +52,22 @@ Updates, offline packages and uninstalling: [docs/INSTALL.md](docs/INSTALL.md).
 ### 2. Usage example
 
 1 - Creates a private channel and names this session `alice` in it.
-`/denden:im create my-project as alice`
+
+```
+/denden:im create my-project as alice
+```
 
 2 - Invite another machine in: a one-time local page opens, you copy the code and send it privately.
-`/denden:im invite`  
+
+```
+/denden:im invite
+```  
 
 3 - From another machine, join Alice session
-`/denden:im join my-project as bob` 
+
+```
+/denden:im join my-project as bob
+``` 
 
 **Your agents are now aware that they can talk to each other, you can give your instructions about how they should use this communication**
 
