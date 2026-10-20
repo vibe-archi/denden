@@ -281,6 +281,9 @@ fn unread_for_wake(st: &State, conv: &str) -> Vec<Unread> {
 
 const SPENT: &str = "wake-up limit reached";
 
+/// What a listener prints when its conversation is paused, before it ends.
+pub const PAUSED: &str = "Paused: not listening, no wake-ups · messages wait for your next message here · /denden:im resume to listen again";
+
 /// The wake-up budget of a conversation is spent: it is told once, with how to raise it.
 fn spent_text(c: &Conv) -> String {
     format!(
@@ -296,7 +299,7 @@ pub fn notify(st: &mut State) {
     let now = now_ms();
     let convs: Vec<String> = st.watchers.iter().map(|w| w.conv.clone()).collect::<HashSet<_>>().into_iter().collect();
     for conv in convs {
-        let Some(c) = st.convs.get(&conv).cloned() else { continue };
+        let Some(c) = st.convs.get(&conv).cloned().filter(|c| !c.paused) else { continue };
         let unread = unread_for_wake(st, &conv);
         let decision = st.wakes.entry(conv.clone()).or_default().decide(now, &unread, c.wakes, false);
         let lines: Vec<String> = match decision {
@@ -331,7 +334,7 @@ fn codex_tick(shared: &Shared) {
             return;
         }
         let now = now_ms();
-        let convs: Vec<Conv> = st.convs.attached().filter(|c| c.app() == "codex").cloned().collect();
+        let convs: Vec<Conv> = st.convs.attached().filter(|c| c.app() == "codex" && !c.paused).cloned().collect();
         let mut jobs = Vec::new();
         for c in convs {
             let unread = unread_for_wake(&st, &c.key);
@@ -612,12 +615,12 @@ fn need(what: &str, msg: impl Into<String>, extra: Value) -> Value {
 /// The channel status a conversation sees.
 fn conv_status(st: &State, conv: &str) -> Value {
     let Some(c) = st.convs.get(conv) else { return json!({ "attached": false }) };
-    let Some((cid, d)) = st.held(conv) else { return json!({ "attached": false, "auto": c.auto, "wakes": c.wakes }) };
+    let Some((cid, d)) = st.held(conv) else { return json!({ "attached": false, "auto": c.auto, "wakes": c.wakes, "paused": c.paused }) };
     let ch = &st.chans[&cid];
     let online: Vec<String> = ch.ch.names.map.values().filter(|n| n.active() && n.n != d && (n.k == ch.ch.me || ch.peers.contains_key(&n.k)) && n.on).map(|n| n.n.clone()).collect();
     json!({
         "attached": true, "label": ch.ch.label(), "denden": d, "machine": ch.ch.machine(), "member": ch.ch.is_member(),
-        "auto": c.auto, "wakes": c.wakes, "online": online, "unread": ch.ch.log.unread(&d).len(),
+        "auto": c.auto, "wakes": c.wakes, "paused": c.paused, "online": online, "unread": ch.ch.log.unread(&d).len(),
         "role": ch.ch.names.get(&d).map(|n| n.role.clone()).unwrap_or_default(), "listening": st.listening(conv),
     })
 }
@@ -878,6 +881,8 @@ fn who(st: &State, b: &Value) -> Value {
             } else if mine {
                 let unread = c.ch.log.unread(&n.n).len();
                 match st.convs.holder(&cid, &n.n) {
+                    Some(h) if h.paused && unread > 0 => format!("paused, {unread} unread"),
+                    Some(h) if h.paused => "paused".into(),
                     Some(h) if h.app() == "claude" && !st.listening(&h.key) && unread > 0 => format!("idle, {unread} unread"),
                     Some(h) if h.app() == "claude" && !st.listening(&h.key) => "idle".into(),
                     _ if unread > 0 => format!("online, {unread} unread"),
@@ -934,6 +939,21 @@ fn set(st: &mut State, b: &Value) -> Value {
     }
     if let Some(w) = b.get("wakes").and_then(Value::as_u64) {
         st.convs.entry(&conv, now_ms()).wakes = w.min(10_000) as u32;
+    }
+    if let Some(p) = b.get("paused").and_then(Value::as_bool) {
+        st.convs.entry(&conv, now_ms()).paused = p;
+        log!("{conv}: {}", if p { "paused" } else { "resumed" });
+        if p {
+            // Its listener (a Claude Monitor, a silent-mode command) ends on this line.
+            let line = format!("{}\n", json!({ "kind": "note", "text": PAUSED, "paused": true }));
+            st.watchers.retain_mut(|w| {
+                if w.conv == conv {
+                    let _ = w.tx.send(line.clone());
+                    return false;
+                }
+                true
+            });
+        }
     }
     if let Some(role) = b.get("role").and_then(Value::as_str) {
         let role: String = role.trim().chars().take(MAX_ROLE).collect();
@@ -1050,7 +1070,7 @@ fn hook(st: &mut State, b: &Value) -> Value {
     if !s(b, "cwd").is_empty() {
         c.cwd = s(b, "cwd").to_string();
     }
-    let (budget, auto) = (c.wakes, c.auto);
+    let (budget, auto, paused) = (c.wakes, c.auto, c.paused);
     if app == "codex" {
         if let Some(t) = codex::title(&b.get("codexHome").and_then(Value::as_str).map(PathBuf::from).unwrap_or_else(codex::codex_home), session) {
             st.convs.entry(&conv, now).title = t;
@@ -1066,8 +1086,9 @@ fn hook(st: &mut State, b: &Value) -> Value {
         // only asking
     } else if prompt {
         items = take_unread(st, &conv, false);
-    } else if !unread_items(st, &conv).is_empty() {
-        // Stop: the agent goes on with them, which costs a wake-up.
+    } else if !paused && !unread_items(st, &conv).is_empty() {
+        // Stop: the agent goes on with them, which costs a wake-up (not while paused: they wait
+        // for the user's next prompt).
         let w = st.wakes.entry(conv.clone()).or_default();
         if w.allowed(now, budget, 0) {
             w.record(now);

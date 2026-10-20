@@ -289,6 +289,7 @@ All of them are used in the conversation, as `/denden:im <command>` (Claude Code
 | `auto on` / `auto off` | handle requests without waiting for the user's go-ahead, or not |
 | `wakes <n>` / `wakes off` | this conversation's wake-up budget per hour |
 | `keepalive on` / `keepalive off` | keep the machine's daemon running with no conversation attached |
+| `pause` / `resume` | stop listening and waking up for this conversation (messages wait for the user's next message here), or start again |
 | `detach` | detaches this conversation; the denden stays, its messages wait |
 | `delete <name>` | deletes a denden of this machine; the name stays bound to the machine |
 | `block <machine>` / `unblock <machine>` | ignores a machine, on this machine only |
@@ -496,7 +497,7 @@ Validated during the agent-im trials, and kept as they were:
   - MCP server built into the binary and `mcp_tool` hooks, with no shell or Node, on every OS;
   - the MCP server starts from a relative path (`./skills/im/denden` with `cwd: "."`), resolved to `.exe` on Windows;
   - an idle conversation is woken with `codex queue --thread <id>`, targeted through `CODEX_THREAD_ID` and checked with `thread_source == "user"`, so that a "Guardian review" sub-conversation is never woken.
-- **Claude**: listening through a Monitor with `watch --timeout 1790` and a 1,800 s Monitor, so that no listener is left orphaned on Windows. The session is identified by `${CLAUDE_SESSION_ID}`.
+- **Claude**: listening in silent mode, a background command (`watch --once`) that ends when messages arrive, which wakes the conversation; it is started again after each wake-up, so nothing is written in the conversation while nothing arrives. The Monitor (`watch --timeout 1790` in a 1,800 s Monitor, so that no listener is left orphaned on Windows) is the fallback: when a background command cannot be started, when the listener ends twice in a row without a message, or when the user says expected messages did not arrive. The session is identified by `${CLAUDE_SESSION_ID}`.
 - **Windows**: the daemon runs from a copy of the binary checked by its hash, because a running executable is locked.
 - **Local pages**: a minimal page, a button that names the next step, a countdown, then the page empties itself and tries to close. They open preferably in the AI's built-in browser (`preview_start` for Claude), otherwise in the system browser, otherwise their address is shown (`--no-browser`, `open`). The CSP is strict, and the APIs require the `x-denden` header, a JSON body and the same origin. Copying to the clipboard goes through `writeText`, then `execCommand`, then a manual copy.
 
@@ -505,7 +506,7 @@ Validated during the agent-im trials, and kept as they were:
 The open points of the discussion, and what was chosen (details in [architecture.md](architecture.md)):
 1. **Language of the fixed texts**: English. The AI relays these lines in the user's language, keeping the `> 🐌» (( … ))` shape. The local pages follow the browser's language (English or French).
 2. **Outputs on several lines** (`who`, late messages): one quote, the first line as a title; `who` adds a table.
-3. **Internal commands**, used by the AI and the hooks, not shown to the user: `inbox`, `watch`, `reply <id> <text>`, `hook-prompt`, `hook-stop`, `mcp`, `stop`. A reply is attached to its question through the `#id` shown with the question.
+3. **Internal commands**, used by the AI and the hooks, not shown to the user: `inbox`, `watch` (`--once` for silent mode), `reply <id> <text>`, `hook-prompt`, `hook-stop`, `mcp`, `stop`. A reply is attached to its question through the `#id` shown with the question.
 4. **New machine notice**: it goes to every conversation attached to the channel, on the machines that see the newcomer arrive, without waking them.
 5. **Sensitive commands**: `join`, `detach`, `delete`, `leave`, `wakes` and `keepalive` were added (see 7.4).
 6. **The invitation page after the copy**: it shows the next step, then closes after 60 seconds. The join page does the same after a successful join.
@@ -552,3 +553,5 @@ When a decision is up to the user, the CLI does not wait for input: it prints th
 | 34 | History kept 30 days; a waiting message dropped after 7 days |
 | 35 | No dashboard in the first version |
 | 36 | A message handed over more than an hour after it was sent: never handled without the user's go-ahead |
+| 37 | Claude listens in silent mode (a background command that ends on a message) by default; the Monitor is the fallback |
+| 38 | `pause` / `resume`: no listener and no wake-up while paused, messages wait for the user's next message here |

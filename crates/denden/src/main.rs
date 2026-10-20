@@ -52,6 +52,7 @@ Usage, from a conversation (the skill passes --session for Claude; Codex sets CO
   denden role \"<text>\"                the role shown in who
   denden auto on|off                  handle requests without waiting for the user's go-ahead
   denden wakes <n>|off                wake-ups per hour for this conversation
+  denden pause | resume               stop listening and waking up (messages wait), or start again
   denden keepalive on|off             keep this machine's daemon up without attached conversations
   denden detach                       detach this conversation (the denden stays, its messages wait)
   denden delete <name>                delete a denden of this machine (the name stays bound to it)
@@ -451,7 +452,8 @@ fn cmd_status(_pos: &[String], opts: &Opts) {
 
 fn status_line(c: &Value) -> String {
     let online = arr(c, "online").len();
-    format!("{} in {} · auto {} · {online} online · {} unread", vs(c, "denden"), vs(c, "label"), if truthy(c.get("auto")) { "on" } else { "off" }, vu(c, "unread"))
+    let paused = if truthy(c.get("paused")) { " · paused" } else { "" };
+    format!("{} in {} · auto {}{paused} · {online} online · {} unread", vs(c, "denden"), vs(c, "label"), if truthy(c.get("auto")) { "on" } else { "off" }, vu(c, "unread"))
 }
 
 fn attached_lines(r: &Value, moved_on_request: bool) -> Vec<String> {
@@ -880,6 +882,19 @@ fn cmd_auto(pos: &[String], opts: &Opts) {
     println!("{}", info(&if on { format!("{d} now handles requests without waiting for your go-ahead") } else { format!("{d} asks you before acting on a request") }));
 }
 
+/// pause / resume: no listener and no wake-up meanwhile; the messages wait for the user's next
+/// prompt here, or for resume.
+fn cmd_pause(on: bool, opts: &Opts) {
+    let h = here(opts);
+    let r = set(&h, json!({ "paused": on }));
+    let d = vs(&r, "denden");
+    if on {
+        println!("{}", info(&format!("{d} is paused: not listening, no wake-ups · messages wait and come with your next message here · /denden:im resume to listen again")));
+    } else {
+        println!("{}", info(&format!("{d} is listening again · {} unread", vu(&r, "unread"))));
+    }
+}
+
 fn cmd_wakes(pos: &[String], opts: &Opts) {
     let h = here(opts);
     let n: u64 = match pos.first().map(|s| s.to_lowercase()).as_deref() {
@@ -988,10 +1003,29 @@ fn cmd_watch(_pos: &[String], opts: &Opts) {
             std::process::exit(0);
         });
     }
+    // --once (silent mode): the listener ends with the first messages, gathered for a moment, for an
+    // agent that runs it as a background command and is woken when it ends. Its last line is for the
+    // agent, not the user: no 🐌 shape.
+    static LAST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let once = flag(opts, "once");
+    if once {
+        std::thread::spawn(|| loop {
+            std::thread::sleep(Duration::from_millis(200));
+            let last = LAST.load(std::sync::atomic::Ordering::SeqCst);
+            if last > 0 && now_ms().saturating_sub(last) >= 1500 {
+                let _one = OUTPUT.lock();
+                emit("(denden: that is all for now. Handle these, then start this same command again in the background to hear the next ones.)");
+                std::process::exit(0);
+            }
+        });
+    }
     let st = ok(call("GET", &q("/status", &[("conv", &conv)]), None, 10000));
     let me = st["conv"]["denden"].as_str().unwrap_or("").to_string();
     if me.is_empty() {
         fail("this conversation is not attached to a denden: nothing to listen to");
+    }
+    if truthy(st["conv"].get("paused")) {
+        return emit(&info(crate::daemon::PAUSED));
     }
     let path = q("/watch", &[("conv", &conv)]);
     loop {
@@ -1009,12 +1043,15 @@ fn cmd_watch(_pos: &[String], opts: &Opts) {
                     }
                     let _one = OUTPUT.lock();
                     emit(&output::item(&it, &me));
-                    if truthy(it.get("detached")) {
+                    if truthy(it.get("detached")) || truthy(it.get("paused")) {
                         end = true;
                         std::process::exit(0);
                     }
                     if let Some(seq) = it.get("seq").and_then(Value::as_u64) {
                         let _ = call_up("POST", "/read", Some(&json!({ "conv": conv, "seqs": [seq] })), 5000);
+                    }
+                    if once {
+                        LAST.store(now_ms(), std::sync::atomic::Ordering::SeqCst);
                     }
                 }
             });
@@ -1122,7 +1159,7 @@ fn cmd_hook_stop() -> ! {
 
 fn parse_args(argv: &[String]) -> (Opts, Vec<String>) {
     const WITH_VALUE: [&str; 6] = ["as", "timeout", "n", "file", "session", "label"];
-    const FLAGS: [&str; 7] = ["json", "peek", "force", "print", "help", "no-browser", "move"];
+    const FLAGS: [&str; 8] = ["json", "peek", "force", "print", "help", "no-browser", "move", "once"];
     let mut opts = Opts::new();
     let mut pos = Vec::new();
     let mut i = 0;
@@ -1220,6 +1257,8 @@ fn main() {
         "role" => cmd_role(&pos, &opts),
         "auto" => cmd_auto(&pos, &opts),
         "wakes" => cmd_wakes(&pos, &opts),
+        "pause" => cmd_pause(true, &opts),
+        "resume" => cmd_pause(false, &opts),
         "keepalive" => cmd_keepalive(&pos, &opts),
         "detach" => cmd_detach(&pos, &opts),
         "delete" => cmd_delete(&pos, &opts),

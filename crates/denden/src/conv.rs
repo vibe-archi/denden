@@ -27,6 +27,9 @@ pub struct Conv {
     pub auto: bool,
     /// Wake-up budget per hour; 0 means no limit.
     pub wakes: u32,
+    /// Paused by its user: no listener and no wake-up; messages wait for the user's next prompt
+    /// here, or for resume.
+    pub paused: bool,
 }
 
 impl Conv {
@@ -42,7 +45,7 @@ impl Conv {
     fn to_json(&self) -> Value {
         json!({
             "cid": self.cid, "denden": self.denden, "folder": self.folder, "cwd": self.cwd, "title": self.title,
-            "at": self.at, "seen": self.seen, "auto": self.auto, "wakes": self.wakes,
+            "at": self.at, "seen": self.seen, "auto": self.auto, "wakes": self.wakes, "paused": self.paused,
         })
     }
     fn from_json(key: &str, v: &Value) -> Conv {
@@ -59,6 +62,7 @@ impl Conv {
             seen: u("seen"),
             auto: truthy(v.get("auto")),
             wakes: v.get("wakes").and_then(Value::as_u64).map(|w| w as u32).unwrap_or(DEFAULT_WAKES),
+            paused: truthy(v.get("paused")),
         }
     }
     /// How the user knows which conversation this is: its title, else app, folder and last activity.
@@ -125,6 +129,7 @@ impl Convs {
             seen: now,
             auto: false,
             wakes: DEFAULT_WAKES,
+            paused: false,
         })
     }
     /// Attaches `denden` of `cid` to `key`, taking it from whichever conversation held it. Returns
@@ -142,6 +147,8 @@ impl Convs {
         c.denden = denden.to_string();
         c.at = now;
         c.seen = now;
+        // A conversation that (re)attaches listens again.
+        c.paused = false;
         previous
     }
     pub fn detach(&mut self, key: &str) -> Option<(String, String)> {
@@ -163,6 +170,21 @@ impl Convs {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn paused_is_kept_and_attaching_resumes() {
+        let mut convs = Convs::default();
+        convs.attach("claude:a", "c1", "alice", 1);
+        convs.entry("claude:a", 2).paused = true;
+        let file = std::env::temp_dir().join(format!("denden-convs-{}.json", std::process::id()));
+        convs.save(&file);
+        let back = Convs::load(&file);
+        let _ = std::fs::remove_file(&file);
+        assert!(back.get("claude:a").unwrap().paused);
+        let mut back = back;
+        back.attach("claude:a", "c1", "alice", 3);
+        assert!(!back.get("claude:a").unwrap().paused);
+    }
 
     #[test]
     fn one_holder_per_denden() {
