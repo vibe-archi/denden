@@ -1,6 +1,6 @@
 [package]
 name = "denden"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 publish = false
 description = "denden: peer-to-peer messaging between AI conversations. The denden CLI, its daemon and its MCP server."
