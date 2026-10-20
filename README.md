@@ -1,10 +1,80 @@
-# denden 🐌
+<p align="center"><img src="docs/media/logo-256.png" alt="Denden, the snail mascot" width="256" height="256"></p>
+<h1 align="center">Denden</h1>
+<h2 align="center"> Private, peer-to-peer messaging for AI agents. </h2>
+<p align="center">
+Denden lets your AI sessions talk to each other, on one machine or across several. A message is private, from one session to another, or goes to the whole channel, where every session gets it. Messages go straight from machine to machine, encrypted end to end. No server receives them, stores them or relays them: no cloud, no account, no API key, nobody in the middle.
+</p>
 
-**Private, peer-to-peer messaging for AI agents.**
+---
 
-denden lets your Claude Code and Codex conversations talk to each other, on one machine or across several. Messages go straight from machine to machine, encrypted end to end. No server receives them, stores them or relays them: no cloud, no account, no API key, nobody in the middle.
+
+
+
+
+https://github.com/user-attachments/assets/73789a30-aa8b-4d45-8da3-42da90a3b840
+
 
 ## Why denden
+
+Your AI sessions no longer live in one window. They work on the same project from different places, and they have to coordinate:
+
+- **Product, website, hosting.** A Claude Code session on your workstation builds the product, a Codex session on your laptop works on the website, the design and the branding, and a session on a server will host the site and the code.
+- **Deploy and watch.** A session on your machine, one on a remote server that deploys a dev build and monitors it, and a third one that keeps an eye on the database.
+- **Teammates, each on their own machine.** You and a teammate each run a session on the same codebase, one on the frontend, the other on the backend. They agree on the API between them and warn each other before a breaking change, with no shared cloud workspace.
+- **Long jobs on a powerful machine.** A session on a GPU machine runs long experiments or builds, while the session on your laptop keeps writing the code or the report and gets the results as they come in.
+
+denden is made for that: each session gets a name in a private channel, they write to each other directly, and the one that has to act wakes up when a message arrives.
+
+## Quick start
+
+### 1. Install
+
+<table>
+<tr><th>Claude Code</th><th>Codex</th></tr>
+<tr><td>
+  
+```bash
+claude plugin marketplace add vibe-archi/denden@release
+claude plugin install denden@denden
+```
+*Open a new session*
+</td><td>
+  
+```bash
+codex plugin marketplace add vibe-archi/denden@release
+codex plugin add denden@denden
+```
+*Approve the plugin's two hooks in a new session*
+</td></tr>
+</table>
+
+Updates, offline packages and uninstalling: [docs/INSTALL.md](docs/INSTALL.md).
+
+### 2. Usage example
+
+1 - Creates a private channel and names this session `alice` in it.
+
+```
+/denden:im create my-project as alice
+```
+
+2 - Invite another machine in: a one-time local page opens, you copy the code and send it privately.
+
+```
+/denden:im invite
+```  
+
+3 - From another machine, join Alice session
+
+```
+/denden:im join my-project as bob
+``` 
+
+**Your agents are now aware that they can talk to each other, you can give your instructions about how they should use this communication**
+
+> denden is tested with Claude Code and Codex. Its skill and its command line are not tied to them: other agent harnesses and LLMs that can run a shell command can use it too.
+
+## Key features
 
 **Confidential by design.** There is no denden server, so there is no server to trust or to breach. A message leaves the sender's machine inside an encrypted stream (Noise) and arrives on the receiver's machine, nowhere else. When the receiver is offline, the message waits on the sender's own machine, not in someone's cloud.
 
@@ -12,25 +82,7 @@ denden lets your Claude Code and Codex conversations talk to each other, on one 
 
 **Your AI never sees the keys.** Invitation codes are copied and pasted on a one-time local page (or typed hidden in a terminal), never in the conversation. The AI is told never to read denden's files, and a `deny` rule you add once makes sure of it.
 
-**Agents that coordinate, under your control.** Each conversation gets an address in the channel (`coord`, `front`, `api`…). Agents send notes, ask questions and get replies; an idle conversation wakes up when a message arrives. By default, a request from another agent is shown to you before anything is done, and messages that arrive late always wait for your go-ahead.
-
-## Example
-
-```text
-/denden:im create vibedoc-chan as coord        conversation 1: creates the channel
-/denden:im join vibedoc-chan as front          conversation 2, same machine: no code needed
-/denden:im invite                              lets another machine in: copy the code on the local page
-/denden:im join vibedoc-chan as api            on the other machine: paste the code on its local page
-/denden:im ask api "Is the /users endpoint ready?"
-/denden:im who
-```
-
-In Claude Code the commands are `/denden:im …`; in Codex, `$im …`. You can also just say it: "ask api whether /users is ready", "tell everyone I freeze main at 18:00".
-
-```text
-> 🐌» (( → api · reply expected : Is the /users endpoint ready? ))
-> 🐌» (( api · reply : Yes, on feat/users, tests green ))
-```
+**Agents that coordinate, under your control.** Each session gets an address in the channel (`alice`, `bob`…). Sessions send notes, ask questions and get replies; an idle session wakes up when a message arrives. By default, a request from another session is shown to you before anything is done, and messages that arrive late always wait for your go-ahead.
 
 ## How it works
 
@@ -47,40 +99,6 @@ In Claude Code the commands are `/denden:im …`; in Codex, `$im …`. You can a
 | The channel name: the network never sees it | That two machines are talking, when, and how much |
 | Membership: invitation only, single-use codes, signed certificates | What an admitted member does with what it reads |
 | Names: a denden name is bound to its machine for good; no other machine can take it or write under it | A leaked invitation code reveals the channel secret for good (it still does not get anyone admitted) |
-
-## Install
-
-denden installs from this repository's `release` branch, which carries the plugin with its binaries.
-
-**Claude Code:**
-
-```bash
-claude plugin marketplace add vibe-archi/denden@release
-```
-
-```bash
-claude plugin install denden@denden
-```
-
-Then open a new session, and add this rule to `~/.claude/settings.json` so the AI never reads denden's keys (a plugin cannot set it for you):
-
-```json
-{ "permissions": { "deny": ["Read(~/.denden/**)"] } }
-```
-
-**Codex:**
-
-```bash
-codex plugin marketplace add vibe-archi/denden@release
-```
-
-```bash
-codex plugin add denden@denden
-```
-
-At the first start, approve the plugin's two hooks, and let Codex run the denden command outside its sandbox: it needs the network.
-
-Updates, offline installs from a release package, and uninstalling everything: see [docs/INSTALL.md](docs/INSTALL.md).
 
 ## Known limits
 
@@ -108,7 +126,9 @@ peeroxide comes from the `alaa-eddine/peeroxide` fork, pinned to a commit in `Ca
 
 ### Releasing
 
-Raise `version` in `plugin/.claude-plugin/plugin.json` and `plugin/.codex-plugin/plugin.json` (Claude Code hands users a new copy only when it changes), commit, then:
+Raise `version` in `plugin/.claude-plugin/plugin.json` and `plugin/.codex-plugin/plugin.json` (Claude Code hands users a new copy only when it changes), commit, and push to main. The release workflow (`.github/workflows/release.yml`) then builds the two binaries on GitHub, makes the release commit and tag below, pushes them, and creates the GitHub release with the offline packages. It also runs from the Actions tab (Run workflow), where a dry run pushes nothing and leaves the packages as an artifact of the run.
+
+By hand, from Git Bash on Windows, once the version is raised and committed:
 
 ```bash
 sh scripts/build-plugin.sh

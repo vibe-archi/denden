@@ -396,7 +396,7 @@ A local shortcut for a frequent subgroup (`servers = api, stress, db`) may come 
 ### 9.1 What denden reports
 
 No security talk in `create` or `join`, and no explanation of how it works. denden only reports what needs the user's attention, in one line:
-1. a known name that shows up with another key (impersonation);
+1. a name of another machine claimed by a machine that already knew whose it was (impersonation), for example `⚠ srv-b [1a2b-3c4d] claimed alice, which belongs to laptop-ak in vibedoc-chan: refused`. It goes to the conversations attached to the channel, without waking them, once per machine and name while the daemon runs. Two machines that created the same name without seeing each other are a conflict (5), not an impersonation, and are not reported this way;
 2. a secret blocked in an outgoing message;
 3. an invitation code pasted in the chat, and therefore blocked;
 4. a protection out of order that needs an action, for example unapproved Codex hooks: without them, neither code blocking nor wake-ups;

@@ -56,10 +56,11 @@ Inside each Noise-encrypted stream, JSON frames separated by newlines:
 **Name certificates.** `{n, k, t, u, app, role, on, d, r, sig}`: the denden `n` belongs to the machine with key `k`, created at `t`, last updated at `u`, signed by `k`. `app`, `role` and `on` (attached to a conversation) feed `who`. `d` marks a deletion (the name stays bound to the machine), `r` a release after a conflict. Each machine spreads them in its `hello` and through `names`. Rules:
 - an unknown name is accepted if it is signed by a member machine;
 - a name already bound to another machine is refused, unless that machine releases it (`r`);
-- a conflict that touches one of our names: if the other machine created it before us, we release it and tell the conversation; otherwise we keep it.
+- a conflict that touches one of our names: if the other machine created it before us, we release it and tell the conversation; otherwise we keep it;
+- a refused name is reported as an impersonation (`⚠ <machine> [<fp>] claimed <name>, which belongs to <owner> in <channel>: refused`, a quiet alert to every conversation attached to the channel, once per machine and name while the daemon runs) only when the machine that knew whose it was still claims it: the certificate comes on the claimant's own connection, it is neither a deletion nor a release, the name is in use by a machine that created it earlier, and we showed the claimant that owner (in our `hello` or a `names` we sent on) at least a minute before. A machine that created a name without seeing it taken gives it up as soon as it sees the earlier creation, so a conflict is never reported this way; nor is a claim created before the owner's (it wins once the owner sees it), one relayed by another machine, or one for a deleted name. What each machine was shown is kept in memory only.
 
 **Messages.**
-- A machine can only write on behalf of its own denden: the sender `from` must belong to the key of the connection.
+- A machine can only write on behalf of its own denden: the sender `from` must belong to the key of the connection. Otherwise the message is refused (`bad-sender`) and only the sending conversation is told; the receiver reports nothing, impersonation being detected on name certificates.
 - The receiver accepts only the names that belong to it; `"all"` stands for all its denden.
 - Between two denden of the same machine, nothing goes through the network.
 - `waited`: the time spent at the sender before this send, to measure the delay without depending on clocks.
