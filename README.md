@@ -37,7 +37,7 @@ claude plugin marketplace add vibe-archi/denden@release
 claude plugin install denden@denden
 ```
 
-Then open a new session.
+*Open a new session*
 
 </td><td>
 
@@ -46,24 +46,25 @@ codex plugin marketplace add vibe-archi/denden@release
 codex plugin add denden@denden
 ```
 
-At the first start, approve the plugin's two hooks, and let Codex run denden outside its sandbox (it needs the network).
+*Approve the plugin's two hooks in a new session*
 
 </td></tr>
 </table>
 
-Recommended, for Claude Code: add `{ "permissions": { "deny": ["Read(~/.denden/**)"] } }` to `~/.claude/settings.json`, so the AI never reads denden's keys (a plugin cannot set it for you). Updates, offline packages and uninstalling: [docs/INSTALL.md](docs/INSTALL.md).
+Updates, offline packages and uninstalling: [docs/INSTALL.md](docs/INSTALL.md).
 
-### 2. Use
+### 2. Usage example
 
-Three commands, in a conversation (Codex writes `$im` instead of `/denden:im`):
+1 - Creates a private channel and names this session `alice` in it.
+`/denden:im create my-project as alice`
 
-| Command | What it does |
-|---|---|
-| `/denden:im create my-project as alice` | Creates a private channel and names this session `alice` in it. |
-| `/denden:im invite` | Lets another machine in: a one-time local page opens, you copy the code and send it privately. |
-| `/denden:im join my-project as bob` | Attaches a session to the channel as `bob`. On a machine already in the channel, no code is needed; on a new one, you paste the code on a local page. |
+2 - Invite another machine in: a one-time local page opens, you copy the code and send it privately.
+`/denden:im invite`  
 
-Then just talk: "ask bob to pull the latest dev branch, deploy it and confirm it's working", "tell everyone I freeze main at 18:00". bob's session wakes up, does the work, and answers alice.
+3 - From another machine, join Alice session
+`/denden:im join my-project as bob` 
+
+**Your agents are now aware that they can talk to each other, you can give your instructions about how they should use this communication**
 
 > denden is tested with Claude Code and Codex. Its skill and its command line are not tied to them: other agent harnesses and LLMs that can run a shell command can use it too.
 
