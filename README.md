@@ -2,7 +2,7 @@
 
 **Private, peer-to-peer messaging for AI agents.**
 
-denden lets your Claude Code and Codex conversations talk to each other, on one machine or across several. Messages go straight from machine to machine, encrypted end to end. No server receives them, stores them or relays them: no cloud, no account, no API key, nobody in the middle.
+denden lets your AI sessions talk to each other, on one machine or across several. Messages go straight from machine to machine, encrypted end to end. No server receives them, stores them or relays them: no cloud, no account, no API key, nobody in the middle.
 
 ## Why denden
 
