@@ -21,7 +21,7 @@ Points of section 12 of design.md, settled here to move forward. They can still 
   daemon.json  daemon.lock  daemon.log   the machine's daemon (daemon.json: port, token, pid, build)
   restart.json                           a command is restarting a daemon from an older build
   bin/                                   checked copies of the binary (Windows locks a running exe)
-  conversations.json                     conversation -> channel, denden, application, mode, budget
+  conversations.json                     conversation -> channel, denden, application, mode, budget, paused
   wakes.json                             wake-up state per conversation (budget spent, Codex notice pending)
   settings.json                          keepalive, notices already given once
   channels/<cid>/                        one folder per channel; <cid> = first 16 hex of the channel id
@@ -70,6 +70,8 @@ Inside each Noise-encrypted stream, JSON frames separated by newlines:
 - **One daemon per machine**, a local HTTP API protected by a token (`x-denden-token`, from `daemon.json`), one swarm connection per channel and per epoch, as in agent-im. A command from a newer build restarts a daemon from an older one.
 - **Routing**: a send is split per receiving machine. Each part waits in `outbox.json` until it is acknowledged, and it is sent again at each reconnection. After 7 days it is dropped, and the sending denden gets a notice. A send to `all` reports how many denden it reached.
 - **Reading**: each denden has its own read state. A message is handed to a conversation by Claude's listener, by Codex's hooks, or by `inbox`.
+- **Listening in Claude**: by default in silent mode, `watch --once` run as a background command. It prints nothing until messages arrive, gathers what comes within 1.5 s, prints it with a last line for the agent, and ends: the end of a background command wakes the conversation, which starts the listener again. It held 33 idle minutes in a test, longer than a Monitor lasts. The fallback is a Monitor on `watch --timeout 1790`, started again at each expiry. (Codex has no such wake-up: the end of a background terminal does not start a turn, so Codex keeps its queued notices.)
+- **Pause**: a paused conversation gets no listener (a running `watch` gets a last notice and ends; a new one ends at once), no queued Codex notice and no Stop-hook handover. Its messages wait for the user's next prompt (the prompt hook) or for `resume`. Attaching a conversation again resumes it.
 - **Lateness**: on handover, `now - (received - waited) >= 1 h` marks the message as late (`DENDEN_LATE_AFTER_SECONDS` changes the hour, for tests). A late message comes with the question "Which ones should I handle?", whatever the mode.
 - **History**: messages older than 30 days are purged at startup, then every hour.
 - **Lifetime**: the daemon stays up while a conversation of the machine is attached, or while one of its invitations is unused. Otherwise it stops after 10 minutes with no Claude listener open, no Codex MCP server connected and no activity, unless `keepalive on` is set.
@@ -82,7 +84,7 @@ Inside each Noise-encrypted stream, JSON frames separated by newlines:
 - **When a decision is up to the user**, the CLI does not wait for input. It prints the question as `🐌»  **…**` and exits with code 3. The AI asks the question, then runs the command again with the answer (`as <name>`, `--move`).
 - **Joining**: once the code is accepted, `join` waits up to 90 s for the admission, then says why it is not there yet (refused, no machine of the channel reached, certificate still to come). In a terminal, `denden join <channel>` asks for the code hidden.
 - **The Codex sandbox** blocks the network and `~/.denden`. When the daemon cannot be reached from inside it, the CLI says so and asks for the command to be run outside the sandbox.
-- **Internal commands**, not shown to the user: `inbox`, `watch`, `reply <id> <text>`, `hook-prompt`, `hook-stop`, `mcp` (the MCP server behind the Codex hooks), `stop`, and `__daemon` / `__launch` (starting the daemon).
+- **Internal commands**, not shown to the user: `inbox`, `watch` (and `watch --once`), `reply <id> <text>`, `hook-prompt`, `hook-stop`, `mcp` (the MCP server behind the Codex hooks), `stop`, and `__daemon` / `__launch` (starting the daemon).
 
 ## 6. Phases
 

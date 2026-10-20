@@ -1,7 +1,7 @@
 {
   "name": "denden",
   "displayName": "denden",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Peer-to-peer messaging between AI conversations, across machines: end-to-end encrypted, invitation-only channels, no server. Skill /denden:im.",
   "author": { "name": "vibe-archi", "url": "https://github.com/vibe-archi" },
   "license": "MIT",
