@@ -1,8 +1,18 @@
-# denden 🐌
+<h1 align="center"> Denden 🐌</h1>
+<h2 align="center"> Private, peer-to-peer messaging for AI agents. </h2>
+<p align="center">
+Denden lets your AI sessions talk to each other, on one machine or across several. Messages go straight from machine to machine, encrypted end to end. No server receives them, stores them or relays them: no cloud, no account, no API key, nobody in the middle.
+</p>
 
-**Private, peer-to-peer messaging for AI agents.**
+---
 
-denden lets your AI sessions talk to each other, on one machine or across several. Messages go straight from machine to machine, encrypted end to end. No server receives them, stores them or relays them: no cloud, no account, no API key, nobody in the middle.
+
+
+
+
+https://github.com/user-attachments/assets/73789a30-aa8b-4d45-8da3-42da90a3b840
+
+
 
 ## Why denden
 
