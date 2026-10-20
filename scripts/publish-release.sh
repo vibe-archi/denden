@@ -4,7 +4,8 @@
 # the docs, the README and the license. main keeps the sources only; the binaries are build outputs there.
 #   claude plugin marketplace add vibe-archi/denden@release
 #   codex plugin marketplace add vibe-archi/denden@release
-# Run from Git Bash after scripts/build-plugin.sh, with the sources committed. It pushes nothing:
+# Run after scripts/build-plugin.sh, with the sources committed, from Git Bash or on Linux (the
+# release workflow, .github/workflows/release.yml, runs it and pushes). It pushes nothing:
 #   git push origin main release v<version>
 # The version comes from plugin/.claude-plugin/plugin.json: Claude Code hands users a new copy only
 # when it changes, so each release needs a new one (in both plugin manifests).

@@ -125,7 +125,9 @@ peeroxide comes from the `alaa-eddine/peeroxide` fork, pinned to a commit in `Ca
 
 ### Releasing
 
-Raise `version` in `plugin/.claude-plugin/plugin.json` and `plugin/.codex-plugin/plugin.json` (Claude Code hands users a new copy only when it changes), commit, then:
+Raise `version` in `plugin/.claude-plugin/plugin.json` and `plugin/.codex-plugin/plugin.json` (Claude Code hands users a new copy only when it changes), commit, and push to main. The release workflow (`.github/workflows/release.yml`) then builds the two binaries on GitHub, makes the release commit and tag below, pushes them, and creates the GitHub release with the offline packages. It also runs from the Actions tab (Run workflow), where a dry run pushes nothing and leaves the packages as an artifact of the run.
+
+By hand, from Git Bash on Windows, once the version is raised and committed:
 
 ```bash
 sh scripts/build-plugin.sh

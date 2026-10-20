@@ -1,0 +1,179 @@
+# Releases denden as scripts/build-plugin.sh, publish-release.sh and pack-plugin.sh do by hand
+# (README, Releasing), with the binaries built here: denden.exe on Windows, the static Linux one
+# on Linux. It adds a commit to the release branch, tags it v<version>, pushes both, and makes
+# the GitHub release with the offline packages.
+#   - A push to main that changes a plugin manifest releases its version, if it is new.
+#   - Run workflow (Actions tab, on main) releases the version of the manifests, which must be new.
+#     With "dry run", from any branch and even for a version already released, it pushes nothing:
+#     the packages stay as an artifact of the run.
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - plugin/.claude-plugin/plugin.json
+      - plugin/.codex-plugin/plugin.json
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Dry run (build and pack, push nothing)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  check:
+    name: Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      go: ${{ steps.version.outputs.go }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: version
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          version=$(jq -r .version plugin/.claude-plugin/plugin.json)
+          codex=$(jq -r .version plugin/.codex-plugin/plugin.json)
+          if [ "$version" != "$codex" ] || ! [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::the two plugin manifests must give the same version x.y.z: $version, $codex"
+            exit 1
+          fi
+          if [ "$DRY_RUN" != true ] && [ "$REF" != refs/heads/main ]; then
+            echo "::error::releases are made from main (a dry run can start from any branch)"
+            exit 1
+          fi
+          go=true
+          tag=$(git ls-remote --tags origin "refs/tags/v$version")
+          if [ -n "$tag" ]; then
+            if [ "$DRY_RUN" = true ]; then
+              echo "::notice::v$version is already released: the dry run rehearses it all the same"
+            elif [ "$EVENT" = push ]; then
+              echo "::notice::v$version is already released: the manifests changed, not the version"
+              go=false
+            else
+              echo "::error::v$version is already released: raise the version in plugin/.claude-plugin/plugin.json and plugin/.codex-plugin/plugin.json"
+              exit 1
+            fi
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "go=$go" >> "$GITHUB_OUTPUT"
+
+  windows:
+    name: Windows x64
+    needs: check
+    if: needs.check.outputs.go == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      # The binary embeds plugin/skills/im/pages: build from the committed bytes, not CRLF copies.
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - run: rustc -V && sh scripts/build-plugin.sh windows
+      # The build must not have changed Cargo.lock: the release says which sources it comes from.
+      - run: git diff --exit-code
+      - uses: actions/upload-artifact@v7
+        with:
+          name: denden-windows-x64
+          path: plugin/skills/im/denden.exe
+          if-no-files-found: error
+          retention-days: 7
+
+  linux:
+    name: Linux x64
+    needs: check
+    if: needs.check.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - run: rustup target add x86_64-unknown-linux-musl
+      - run: rustc -V && sh scripts/build-plugin.sh linux
+      - run: git diff --exit-code
+      - uses: actions/upload-artifact@v7
+        with:
+          name: denden-linux-x64
+          path: plugin/skills/im/bin/linux-x64/denden
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish
+    needs: [check, windows, linux]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+      DRY_RUN: ${{ inputs.dry_run }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # the release branch and the tags
+      - uses: actions/download-artifact@v8
+        with:
+          name: denden-windows-x64
+          path: plugin/skills/im
+      - uses: actions/download-artifact@v8
+        with:
+          name: denden-linux-x64
+          path: plugin/skills/im/bin/linux-x64
+      - name: Release commit, tag and packages
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          # publish-release.sh adds a commit to the local release branch.
+          if git rev-parse -q --verify refs/remotes/origin/release > /dev/null; then
+            git branch --no-track release refs/remotes/origin/release
+          fi
+          if [ "$DRY_RUN" = true ]; then
+            git tag -d "v$VERSION" 2> /dev/null || true # in this runner only, so the rehearsal can tag
+          fi
+          # The binaries were built from this same commit: SOURCE and SHA256SUMS, then as by hand.
+          sh scripts/build-plugin.sh sums
+          sh scripts/publish-release.sh
+          sh scripts/pack-plugin.sh
+          echo "denden $VERSION: release commit $(git rev-parse --short release), tag v$VERSION$([ "$DRY_RUN" != true ] || echo ', dry run: nothing pushed')" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: denden-${{ needs.check.outputs.version }}-packages
+          path: dist/
+          if-no-files-found: error
+      - name: Push the release branch and the tag
+        if: inputs.dry_run != true
+        run: git push --atomic origin refs/heads/release "refs/tags/v$VERSION"
+      - name: GitHub release
+        if: inputs.dry_run != true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          name=$(basename dist/denden-*.tar.gz .tar.gz)
+          cat > "$RUNNER_TEMP/notes.md" << EOF
+          denden $VERSION, from main ${GITHUB_SHA::7}.
+
+          - **From GitHub**, the \`release\` branch: \`claude plugin marketplace add $GH_REPO@release\`, \`codex plugin marketplace add $GH_REPO@release\`.
+          - **Offline**: \`$name.tar.gz\` (Linux x64) or \`$name.zip\` (Windows x64), checked with \`$name.sha256\`.
+
+          Install, update, uninstall: [docs/INSTALL.md](https://github.com/$GH_REPO/blob/v$VERSION/docs/INSTALL.md).
+          EOF
+          gh release create "v$VERSION" dist/* --verify-tag --title "denden $VERSION" --notes-file "$RUNNER_TEMP/notes.md"
