@@ -22,6 +22,58 @@ fn quote_lines(text: &str) -> String {
     text.trim_end().replace("\r\n", "\n").replace('\n', "\n> ")
 }
 
+/// Lines printed together come under one snail: one line stays `> 🐌» (( … ))`, several become
+///   > 🐌» ((
+///   > line 1
+///   > line 2
+///   > ))
+/// Other lines between them (a table row) go into the block; a question ends it.
+pub fn group(lines: &[String]) -> String {
+    const HEAD: &str = "> 🐌» (( ";
+    const TAIL: &str = " ))";
+    fn close(open: &mut Vec<String>, out: &mut Vec<String>) {
+        match open.len() {
+            0 => {}
+            1 if !open[0].contains('\n') => out.push(format!("{HEAD}{}{TAIL}", open[0])),
+            _ => {
+                let body: Vec<String> = open.iter().flat_map(|t| t.lines().map(|l| format!("> {l}")).collect::<Vec<_>>()).collect();
+                out.push(format!("> 🐌» ((\n{}\n> ))", body.join("\n")));
+            }
+        }
+        open.clear();
+    }
+    let (mut out, mut open) = (Vec::new(), Vec::new());
+    for line in lines {
+        if line.starts_with(HEAD) && line.ends_with(TAIL) && line.len() >= HEAD.len() + TAIL.len() {
+            open.push(line[HEAD.len()..line.len() - TAIL.len()].replace("\n> ", "\n"));
+        } else if line.starts_with("🐌»  **") {
+            close(&mut open, &mut out);
+            out.push(line.clone());
+        } else if open.is_empty() {
+            out.push(line.clone());
+        } else {
+            open.push(line.clone());
+        }
+    }
+    close(&mut open, &mut out);
+    out.join("\n")
+}
+
+/// What a command prints for the conversation waits here, and comes out grouped (`group`) when the
+/// command ends, fails or asks a question.
+static PENDING: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+pub fn say(line: impl Into<String>) {
+    PENDING.lock().unwrap_or_else(|e| e.into_inner()).push(line.into());
+}
+
+pub fn flush() {
+    let lines = std::mem::take(&mut *PENDING.lock().unwrap_or_else(|e| e.into_inner()));
+    if !lines.is_empty() {
+        println!("{}", group(&lines));
+    }
+}
+
 fn s<'a>(v: &'a Value, k: &str) -> &'a str {
     v.get(k).and_then(Value::as_str).unwrap_or("")
 }
@@ -93,6 +145,19 @@ mod tests {
         assert_eq!(alert("bad key"), "> 🐌» (( ⚠ bad key ))");
         assert_eq!(question("Which name?"), "🐌»  **Which name?**");
         assert_eq!(info("a\nb"), "> 🐌» (( a\n> b ))");
+    }
+
+    #[test]
+    fn grouped_under_one_snail() {
+        let one = vec![info("Channel x created")];
+        assert_eq!(group(&one), "> 🐌» (( Channel x created ))");
+        let three = vec![info("This conversation is bob in x"), info("Role of bob: tests"), alert("bad key")];
+        assert_eq!(group(&three), "> 🐌» ((\n> This conversation is bob in x\n> Role of bob: tests\n> ⚠ bad key\n> ))");
+        let table = vec![info("x · 2 denden"), "| denden | state |".to_string(), "| bob | online |".to_string()];
+        assert_eq!(group(&table), "> 🐌» ((\n> x · 2 denden\n> | denden | state |\n> | bob | online |\n> ))");
+        let ask = vec![info("3 messages arrived while you were away"), info("a : b"), question("Which ones?")];
+        assert_eq!(group(&ask), "> 🐌» ((\n> 3 messages arrived while you were away\n> a : b\n> ))\n🐌»  **Which ones?**");
+        assert_eq!(group(&[info("a\nb")]), "> 🐌» ((\n> a\n> b\n> ))");
     }
 
     #[test]

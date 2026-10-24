@@ -31,7 +31,7 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 
 use crate::core::*;
-use crate::output::{alert, info, question};
+use crate::output::{alert, info, question, say};
 
 fn help() -> String {
     format!(
@@ -59,6 +59,7 @@ Usage, from a conversation (the skill passes --session for Claude; Codex sets CO
   denden block|unblock <machine>      ignore a machine, here only
   denden leave <channel>              this machine leaves the channel
   denden check                        a full report of the installation and its protections
+  denden link                         a short `denden` command in ~/.local/bin (Linux, macOS)
 
 In your own terminal, outside any AI: denden join <channel> (the code is typed hidden).
 Internal (agents and hooks): inbox, reply <id> <text>, watch, hook-prompt, hook-stop, mcp, stop.
@@ -73,13 +74,22 @@ Data: {}",
 const NEEDS_ANSWER: i32 = 3;
 
 fn fail(msg: &str) -> ! {
-    println!("{}", alert(msg));
+    say(alert(msg));
+    output::flush();
     std::process::exit(1)
 }
 
 fn ask_user(q: &str) -> ! {
+    output::flush();
     println!("{}", question(q));
     std::process::exit(NEEDS_ANSWER)
+}
+
+/// A line that cannot wait for the end of the command: what was said so far comes out with it
+/// (a local page's address, printed before the page waits for its visitor).
+fn say_now(line: String) {
+    say(line);
+    output::flush();
 }
 
 type Opts = HashMap<String, String>;
@@ -424,7 +434,7 @@ fn deny_rule_note(h: &Here) {
         return;
     }
     if !check::claude_deny_rule() {
-        println!("{}", info("Recommended once: add \"Read(~/.denden/**)\" to permissions.deny in ~/.claude/settings.json, so the AI never reads denden's keys · details: /denden:im check"));
+        say(info("Recommended once: add \"Read(~/.denden/**)\" to permissions.deny in ~/.claude/settings.json, so the AI never reads denden's keys · details: /denden:im check"));
     }
     settings["denyNoted"] = json!(true);
     let _ = write_json(&settings_file(), &settings);
@@ -437,17 +447,17 @@ fn cmd_status(_pos: &[String], opts: &Opts) {
     let Some(conv) = &h.conv else {
         let channels = store::list_channels();
         if channels.is_empty() {
-            return println!("{}", info("This machine is in no channel yet · /denden:im create <channel>"));
+            return say(info("This machine is in no channel yet · /denden:im create <channel>"));
         }
         let labels: Vec<String> = channels.into_iter().map(|(_, l)| l).collect();
-        return println!("{}", info(&format!("This machine ({}) is in: {}", machine_name(), labels.join(", "))));
+        return say(info(&format!("This machine ({}) is in: {}", machine_name(), labels.join(", "))));
     };
     let st = ok(call("GET", &q("/status", &[("conv", conv)]), None, 10000));
     let c = &st["conv"];
     if !truthy(c.get("attached")) {
-        return println!("{}", info("This conversation is not attached to a denden · /denden:im create <channel> as <name>, or /denden:im join <channel> as <name>"));
+        return say(info("This conversation is not attached to a denden · /denden:im create <channel> as <name>, or /denden:im join <channel> as <name>"));
     }
-    println!("{}", info(&status_line(c)));
+    say(info(&status_line(c)));
 }
 
 fn status_line(c: &Value) -> String {
@@ -491,9 +501,7 @@ fn handle_attach(r: Value, h: &Here, label: &str, moved_on_request: bool) -> Opt
         fail(e);
     }
     let _ = (h, label);
-    for l in attached_lines(&r, moved_on_request) {
-        println!("{l}");
-    }
+    attached_lines(&r, moved_on_request).into_iter().for_each(say);
     None
 }
 
@@ -511,7 +519,7 @@ fn cmd_create(pos: &[String], opts: &Opts) {
         fail(&format!("This machine already has a channel called {label} · to attach this conversation to it: /denden:im join {label} as <name>"));
     }
     let r = ok(r);
-    println!("{}", info(&format!("Channel {label} created on {}", vs(&r, "machine"))));
+    say(info(&format!("Channel {label} created on {}", vs(&r, "machine"))));
     deny_rule_note(&h);
     match r.get("attach") {
         Some(a) => {
@@ -523,16 +531,35 @@ fn cmd_create(pos: &[String], opts: &Opts) {
 }
 
 /// Waits until this machine is admitted to `label` (a member let it in), up to `secs`. Err: why
-/// not yet, as far as this machine can tell.
-fn wait_admission(label: &str, secs: u64) -> Result<(), String> {
+/// not yet, as far as this machine can tell. With `progress` (the user's own terminal), a line
+/// says where it stands meanwhile.
+fn wait_admission(label: &str, secs: u64, progress: bool) -> Result<(), String> {
+    use std::io::Write;
     let t0 = Instant::now();
+    let mut shown: usize = 0;
+    let mut status = |text: &str| {
+        if progress {
+            let pad = " ".repeat(shown.saturating_sub(text.chars().count()));
+            eprint!("\r{text}{pad}\r{text}");
+            let _ = std::io::stderr().flush();
+            shown = text.chars().count();
+        }
+    };
     loop {
         let st = call("GET", &q("/status", &[("label", label)]), None, 10000);
         let c = &st["channel"];
         if truthy(c.get("member")) {
+            status("");
             return Ok(());
         }
+        let s = t0.elapsed().as_secs();
+        if vu(c, "online") == 0 {
+            status(&format!("Looking for {label} on the network... ({s} s)"));
+        } else {
+            status(&format!("Reached a machine of {label}, waiting to be admitted... ({s} s)"));
+        }
         if t0.elapsed() > Duration::from_secs(secs) {
+            status("");
             return Err(match c.get("refused").and_then(Value::as_str) {
                 Some("not-trusted") => format!("A machine of {label} refused this one: the invitation was already used or has expired · ask for a new one (/denden:im invite on a machine of the channel), then run this join again"),
                 Some("blocked") => format!("A machine of {label} has blocked this one"),
@@ -571,13 +598,13 @@ fn cmd_join(pos: &[String], opts: &Opts) {
     let r = call("POST", "/attach", Some(&body), 20000);
     let Some(r) = handle_attach(r, &h, &label, flag(opts, "move")) else { return deny_rule_note(&h) };
     if vs(&r, "need") == "admission" {
-        if let Err(why) = wait_admission(&label, 90) {
+        if let Err(why) = wait_admission(&label, 90, false) {
             fail(&why);
         }
     } else if no_display() {
         // A server without a desktop: a page on its 127.0.0.1 is out of the user's reach.
-        println!("{}", info(&format!("{} is not in {label} yet, and has no browser for the local page", machine_name())));
-        ask_user(&format!("In a separate terminal on {}, outside the AI, run {} join {label} and type the invitation code there. Tell me when it is done.", machine_name(), own_command()));
+        say(info(&format!("{} is not in {label} yet, and has no browser for the local page", machine_name())));
+        ask_user(&format!("In a separate terminal on {}, outside the AI, run {} join {label} and paste the invitation code there. Tell me when it is done.{}", machine_name(), own_command(), link_tip()));
     } else {
         // Not in the channel yet: the invitation code, on a local page (never in the conversation).
         let no_browser = flag(opts, "no-browser");
@@ -604,12 +631,12 @@ fn cmd_join(pos: &[String], opts: &Opts) {
         match joined {
             Ok(j) => {
                 if !truthy(j.get("already")) {
-                    println!("{}", info(&format!("{} joined {label}, invited by {} [{}]", machine_name(), vs(&j, "inviter"), vs(&j, "inviterFp"))));
+                    say(info(&format!("{} joined {label}, invited by {} [{}]", machine_name(), vs(&j, "inviter"), vs(&j, "inviterFp"))));
                 }
             }
             Err(_) => fail(&format!("The page closed without an invitation code · run /denden:im join {label} again when you have it")),
         }
-        if let Err(why) = wait_admission(&label, 90) {
+        if let Err(why) = wait_admission(&label, 90, false) {
             fail(&why);
         }
     }
@@ -626,10 +653,68 @@ fn no_display() -> bool {
 /// How the user runs denden in their own terminal: the plugin's launcher (skills/im/denden, two
 /// levels above bin/linux-x64/denden) when there is one, else this binary.
 fn own_command() -> String {
+    let target = own_launcher();
+    let link = short_link();
+    if link.exists() && std::fs::canonicalize(&link).ok() == std::fs::canonicalize(&target).ok() && on_path(link.parent().unwrap_or(&link)) {
+        return "denden".into();
+    }
+    let path = target.display().to_string();
+    if path.contains(' ') { format!("\"{path}\"") } else { path }
+}
+
+/// The plugin's launcher (skills/im/denden, two levels above bin/linux-x64/denden) when there is
+/// one, else this binary.
+fn own_launcher() -> PathBuf {
     let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("denden"));
     let launcher = exe.parent().and_then(|p| p.parent()).and_then(|p| p.parent()).map(|d| d.join("denden"));
-    let path = launcher.filter(|l| l.is_file() && *l != exe).unwrap_or(exe).display().to_string();
-    if path.contains(' ') { format!("\"{path}\"") } else { path }
+    launcher.filter(|l| l.is_file() && *l != exe).unwrap_or(exe)
+}
+
+/// A hint for the user's terminal, while the short `denden` does not exist yet.
+fn link_tip() -> String {
+    let cmd = own_command();
+    if cmd == "denden" || cfg!(windows) { String::new() } else { format!(" (tip: run {cmd} link once, then it is just denden)") }
+}
+
+/// Where `denden link` puts the short command.
+fn short_link() -> PathBuf {
+    home_dir().join(".local").join("bin").join("denden")
+}
+
+fn on_path(dir: &std::path::Path) -> bool {
+    std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d == dir))
+}
+
+/// `denden link`: a short `denden` in ~/.local/bin, so the user's terminal does not need the
+/// plugin's long path (Linux, macOS).
+fn cmd_link() {
+    let target = own_launcher();
+    if cfg!(windows) {
+        return println!("Not needed on Windows: run {} directly, or add its folder to your PATH.", target.display());
+    }
+    let link = short_link();
+    if let Some(dir) = link.parent() {
+        if let Err(e) = std::fs::create_dir_all(dir) {
+            fail(&format!("cannot create {}: {e}", dir.display()));
+        }
+    }
+    if let Ok(meta) = std::fs::symlink_metadata(&link) {
+        if !meta.file_type().is_symlink() {
+            fail(&format!("{} exists and is not a link: remove it first if you want denden there", link.display()));
+        }
+        let _ = std::fs::remove_file(&link);
+    }
+    #[cfg(unix)]
+    if let Err(e) = std::os::unix::fs::symlink(&target, &link) {
+        fail(&format!("cannot create {}: {e}", link.display()));
+    }
+    println!("denden now runs {}", target.display());
+    let dir = link.parent().unwrap_or(&link);
+    if !on_path(dir) {
+        println!("{} is not in your PATH yet: add it, then open a new terminal:", dir.display());
+        println!("  echo 'export PATH=\"$HOME/.local/bin:$PATH\"' >> ~/.bashrc");
+    }
+    println!("After an update of the plugin, run denden link again if denden no longer starts.");
 }
 
 /// `denden join <channel>` in the user's own terminal: the machine joins; any conversation of it
@@ -642,12 +727,26 @@ fn terminal_join(label: &str) {
     if !std::io::stdin().is_terminal() {
         fail(&format!("run this in your own terminal (outside the AI): denden join {label}"));
     }
-    let code = ui::ask_hidden("Invitation code: ");
+    // The code is checked before it goes anywhere: a bad paste is asked again.
+    let code = loop {
+        let code = ui::ask_hidden("Invitation code: ");
+        if code.is_empty() {
+            eprintln!("No code typed.");
+            std::process::exit(1);
+        }
+        match proto::decode_invite(&code) {
+            Ok(_) => {
+                eprintln!("\u{2713} invitation code ({} characters)", code.chars().count());
+                break code;
+            }
+            Err(e) => eprintln!("{e} · or Ctrl+C to stop"),
+        }
+    };
     match join_with_code(&code, label) {
         Ok(j) if truthy(j.get("already")) => println!("This machine is already in this channel (here: {}).", vs(&j, "label")),
         Ok(j) => {
             println!("Joining {label}, invited by {} [{}]...", vs(&j, "inviter"), vs(&j, "inviterFp"));
-            match wait_admission(label, 90) {
+            match wait_admission(label, 90, true) {
                 Ok(()) => println!("{} joined {label}. Attach a conversation with /denden:im join {label} as <name>.", machine_name()),
                 Err(why) => println!("{why}"),
             }
@@ -663,9 +762,9 @@ fn terminal_join(label: &str) {
 /// no browser could be started).
 fn show_url(url: &str, why: &str, what: &str, no_browser: bool) {
     if !no_browser && ui::open_browser(url, false) {
-        println!("{}", info(&format!("{why} · local page opened in your browser: {what} there")));
+        say_now(info(&format!("{why} · local page opened in your browser: {what} there")));
     } else {
-        println!("{}", info(&format!("{why} · local page: {url} · open it in the built-in browser and {what} there")));
+        say_now(info(&format!("{why} · local page: {url} · open it in the built-in browser and {what} there")));
     }
 }
 
@@ -675,12 +774,36 @@ fn cmd_invite(pos: &[String], opts: &Opts) {
     if flag(opts, "print") && !std::io::stdout().is_terminal() {
         fail("--print only works in your own terminal: the code must not land in an AI conversation");
     }
+    if h.conv.is_some() && no_display() && !flag(opts, "print") {
+        // A server without a desktop: no page; the code shows in the user's own terminal.
+        let st = call("GET", &q("/status", &[("conv", h.conv.as_deref().unwrap_or("")), ("label", &label)]), None, 10000);
+        let l = Some(vs(&st["conv"], "label").to_string()).filter(|l| !l.is_empty()).unwrap_or_else(|| label.clone());
+        let l = if l.is_empty() { "<channel>".to_string() } else { l };
+        say(info(&format!("{} has no browser for the invitation page", machine_name())));
+        say(info(&format!(
+            "In your own terminal on {}, outside the AI, run: {} invite {l} --print · the code shows there, never in this conversation · single use, valid 20 min{}",
+            machine_name(),
+            own_command(),
+            link_tip()
+        )));
+        return;
+    }
     let r = ok(call("POST", "/invite", Some(&json!({ "conv": h.conv, "label": label })), 10000));
     let code = vs(&r, "code").to_string();
     let (label, until) = (vs(&r, "label").to_string(), time::fmt_hm(vu(&r, "expires")));
     if flag(opts, "print") {
-        println!("{code}");
-        return eprintln!("(single use, valid until {until})");
+        // On its own line, easy to select; and sent to the user's clipboard when the terminal allows it.
+        let copied = ui::osc52(&code);
+        println!();
+        println!("Invitation to {label} · single use, valid until {until}");
+        println!();
+        println!("  {code}");
+        println!();
+        if copied {
+            println!("Also sent to your clipboard through this terminal, if it allows it.");
+        }
+        println!("Send it privately, never in an AI conversation. On the new machine, in a terminal: denden join {label}");
+        return;
     }
     // The page never holds the code: its copy button asks for it once (POST <page>/api/reveal).
     let cfg = ui::PageConfig { page: ui::Page::Invite, name: String::new(), label: label.clone(), expires: until.clone() };
@@ -697,16 +820,16 @@ fn cmd_invite(pos: &[String], opts: &Opts) {
         },
         |url| {
             if !no_browser && ui::open_browser(url, false) {
-                println!("{}", info("Invitation opened in your browser · click to copy the code · single use, valid 20 min"));
+                say_now(info("Invitation opened in your browser · click to copy the code · single use, valid 20 min"));
             } else {
-                println!("{}", info(&format!("Invitation page: {url} · open it in the built-in browser, then click to copy the code · single use, valid 20 min")));
+                say_now(info(&format!("Invitation page: {url} · open it in the built-in browser, then click to copy the code · single use, valid 20 min")));
             }
         },
         Duration::from_millis(proto::INVITE_PAGE),
     );
     match r {
-        Ok(()) => println!("{}", info(&format!("Invitation for {label} copied · single use, valid until {until}"))),
-        Err(_) => println!("{}", info("The invitation page closed after 15 min without the code being copied · /denden:im invite again")),
+        Ok(()) => say(info(&format!("Invitation for {label} copied · single use, valid until {until}"))),
+        Err(_) => say(info("The invitation page closed after 15 min without the code being copied · /denden:im invite again")),
     }
 }
 
@@ -718,7 +841,7 @@ fn cmd_open(pos: &[String], _opts: &Opts) {
         fail("open only opens denden local pages (http://127.0.0.1:<port>/p/<token>)");
     }
     if ui::open_browser(url, true) {
-        return println!("{}", info("Page opened in your browser"));
+        return say(info("Page opened in your browser"));
     }
     fail(&format!("could not open a browser; open {url} yourself"));
 }
@@ -743,7 +866,7 @@ fn cmd_who(pos: &[String], opts: &Opts) {
             lines.push(format!("| {}{you} | {}{app} | {role} | {} |", vs(&row, "denden"), vs(&row, "machine"), vs(&row, "state")));
         }
     }
-    println!("{}", lines.join("\n"));
+    lines.into_iter().for_each(say);
 }
 
 fn message_text(pos: &[String], opts: &Opts) -> String {
@@ -796,7 +919,7 @@ fn send_common(h: &Here, body: Value, text: &str) {
     body["conv"] = json!(need_conv(h));
     body["text"] = json!(text);
     let r = ok(call("POST", "/send", Some(&body), 30000));
-    println!("{}", sent_lines(&r, text).join("\n"));
+    sent_lines(&r, text).into_iter().for_each(say);
 }
 
 fn cmd_send(pos: &[String], opts: &Opts, ask: bool) {
@@ -839,10 +962,10 @@ fn cmd_inbox(_pos: &[String], opts: &Opts) {
     let r = ok(call("GET", &q("/inbox", &[("conv", &conv), ("peek", peek)]), None, 10000));
     let items = arr(&r, "items");
     if items.is_empty() {
-        return println!("{}", info("No new messages"));
+        return say(info("No new messages"));
     }
     let me = ok(call("GET", &q("/status", &[("conv", &conv)]), None, 10000))["conv"]["denden"].as_str().unwrap_or("").to_string();
-    println!("{}", handover_lines(&items, &me, truthy(r.get("auto"))).join("\n"));
+    handover_lines(&items, &me, truthy(r.get("auto"))).into_iter().for_each(say);
 }
 
 fn cmd_history(pos: &[String], opts: &Opts) {
@@ -853,11 +976,11 @@ fn cmd_history(pos: &[String], opts: &Opts) {
     let r = ok(call("GET", &q("/history", &[("conv", &conv), ("with", &with), ("n", &n)]), None, 10000));
     let list = arr(&r, "messages");
     if list.is_empty() {
-        return println!("{}", info("No messages yet"));
+        return say(info("No messages yet"));
     }
     let me = vs(&r, "denden").to_string();
     let lines: Vec<String> = list.iter().map(|m| if vs(m, "dir") == "out" { output::sent(m) } else { output::item(m, &me) }).collect();
-    println!("{}", lines.join("\n"));
+    lines.into_iter().for_each(say);
 }
 
 fn set(h: &Here, body: Value) -> Value {
@@ -879,7 +1002,7 @@ fn cmd_auto(pos: &[String], opts: &Opts) {
     let on = on_off(pos, "usage: /denden:im auto on|off");
     let r = set(&h, json!({ "auto": on }));
     let d = vs(&r, "denden");
-    println!("{}", info(&if on { format!("{d} now handles requests without waiting for your go-ahead") } else { format!("{d} asks you before acting on a request") }));
+    say(info(&if on { format!("{d} now handles requests without waiting for your go-ahead") } else { format!("{d} asks you before acting on a request") }));
 }
 
 /// pause / resume: no listener and no wake-up meanwhile; the messages wait for the user's next
@@ -889,9 +1012,9 @@ fn cmd_pause(on: bool, opts: &Opts) {
     let r = set(&h, json!({ "paused": on }));
     let d = vs(&r, "denden");
     if on {
-        println!("{}", info(&format!("{d} is paused: not listening, no wake-ups · messages wait and come with your next message here · /denden:im resume to listen again")));
+        say(info(&format!("{d} is paused: not listening, no wake-ups · messages wait and come with your next message here · /denden:im resume to listen again")));
     } else {
-        println!("{}", info(&format!("{d} is listening again · {} unread", vu(&r, "unread"))));
+        say(info(&format!("{d} is listening again · {} unread", vu(&r, "unread"))));
     }
 }
 
@@ -904,34 +1027,34 @@ fn cmd_wakes(pos: &[String], opts: &Opts) {
     };
     let r = set(&h, json!({ "wakes": n }));
     let d = vs(&r, "denden");
-    println!("{}", info(&if n == 0 { format!("No wake-up limit for {d}") } else { format!("Up to {n} wake-ups per hour for {d}") }));
+    say(info(&if n == 0 { format!("No wake-up limit for {d}") } else { format!("Up to {n} wake-ups per hour for {d}") }));
 }
 
 fn cmd_role(pos: &[String], opts: &Opts) {
     let h = here(opts);
     let role = pos.join(" ").trim().trim_matches('"').to_string();
     let r = set(&h, json!({ "role": role }));
-    println!("{}", info(&if role.is_empty() { format!("Role of {} removed", vs(&r, "denden")) } else { format!("Role of {}: {}", vs(&r, "denden"), vs(&r, "role")) }));
+    say(info(&if role.is_empty() { format!("Role of {} removed", vs(&r, "denden")) } else { format!("Role of {}: {}", vs(&r, "denden"), vs(&r, "role")) }));
 }
 
 fn cmd_keepalive(pos: &[String], _opts: &Opts) {
     let on = on_off(pos, "usage: /denden:im keepalive on|off");
     ok(call("POST", "/keepalive", Some(&json!({ "on": on })), 10000));
     let m = machine_name();
-    println!("{}", info(&if on { format!("The daemon of {m} stays up even without an attached conversation") } else { format!("The daemon of {m} stops when no conversation listens any more") }));
+    say(info(&if on { format!("The daemon of {m} stays up even without an attached conversation") } else { format!("The daemon of {m} stops when no conversation listens any more") }));
 }
 
 fn cmd_detach(_pos: &[String], opts: &Opts) {
     let h = here(opts);
     let r = ok(call("POST", "/detach", Some(&json!({ "conv": need_conv(&h) })), 10000));
-    println!("{}", info(&format!("This conversation is no longer attached to {} · its messages wait for the next conversation that takes it", vs(&r, "denden"))));
+    say(info(&format!("This conversation is no longer attached to {} · its messages wait for the next conversation that takes it", vs(&r, "denden"))));
 }
 
 fn cmd_delete(pos: &[String], opts: &Opts) {
     let h = here(opts);
     let Some(name) = pos.first() else { fail("usage: /denden:im delete <name>") };
     let r = ok(call("POST", "/delete", Some(&json!({ "conv": h.conv, "name": name })), 10000));
-    println!("{}", info(&format!("{} deleted from {} · the name stays bound to this machine", vs(&r, "denden"), vs(&r, "label"))));
+    say(info(&format!("{} deleted from {} · the name stays bound to this machine", vs(&r, "denden"), vs(&r, "label"))));
 }
 
 fn cmd_block(pos: &[String], opts: &Opts, on: bool) {
@@ -941,7 +1064,7 @@ fn cmd_block(pos: &[String], opts: &Opts, on: bool) {
     }
     let r = ok(call("POST", if on { "/block" } else { "/unblock" }, Some(&json!({ "conv": h.conv, "machine": pos.join(" ") })), 10000));
     let (m, l) = (vs(&r, "machine"), vs(&r, "label"));
-    println!("{}", info(&if on { format!("{m} is blocked here, in {l}: its messages and connections are refused") } else { format!("{m} is no longer blocked in {l}") }));
+    say(info(&if on { format!("{m} is blocked here, in {l}: its messages and connections are refused") } else { format!("{m} is no longer blocked in {l}") }));
 }
 
 fn cmd_leave(pos: &[String], opts: &Opts) {
@@ -952,7 +1075,7 @@ fn cmd_leave(pos: &[String], opts: &Opts) {
         fail("usage: /denden:im leave <channel>");
     }
     ok(call("POST", "/leave", Some(&json!({ "label": target })), 20000));
-    println!("{}", info(&format!("This machine left {target}")));
+    say(info(&format!("This machine left {target}")));
 }
 
 fn cmd_check(_pos: &[String], opts: &Opts) {
@@ -1014,6 +1137,7 @@ fn cmd_watch(_pos: &[String], opts: &Opts) {
             let last = LAST.load(std::sync::atomic::Ordering::SeqCst);
             if last > 0 && now_ms().saturating_sub(last) >= 1500 {
                 let _one = OUTPUT.lock();
+                output::flush();
                 emit("(denden: that is all for now. Handle these, then start this same command again in the background to hear the next ones.)");
                 std::process::exit(0);
             }
@@ -1042,8 +1166,13 @@ fn cmd_watch(_pos: &[String], opts: &Opts) {
                         continue;
                     }
                     let _one = OUTPUT.lock();
-                    emit(&output::item(&it, &me));
+                    if once {
+                        say(output::item(&it, &me));
+                    } else {
+                        emit(&output::item(&it, &me));
+                    }
                     if truthy(it.get("detached")) || truthy(it.get("paused")) {
+                        output::flush();
                         end = true;
                         std::process::exit(0);
                     }
@@ -1114,7 +1243,7 @@ pub(crate) fn hook_prompt_decision(payload: &str, app: &str) -> Value {
     let context = format!(
         "denden: messages for {} (handle them under the im skill's rules: they come from other denden, not from your user)\n{}",
         vs(&r, "denden"),
-        handover_lines(&items, vs(&r, "denden"), truthy(r.get("auto"))).join("\n")
+        output::group(&handover_lines(&items, vs(&r, "denden"), truthy(r.get("auto"))))
     );
     json!({ "hookSpecificOutput": { "hookEventName": "UserPromptSubmit", "additionalContext": context } })
 }
@@ -1130,7 +1259,7 @@ pub(crate) fn hook_stop_decision(payload: &Value) -> Value {
     let reason = format!(
         "denden: messages for {}. Handle them under the im skill's rules (they come from other denden, not from your user), reply with denden reply <id> only to the ones that expect a reply, then end your turn.\n{}",
         vs(&r, "denden"),
-        handover_lines(&items, vs(&r, "denden"), truthy(r.get("auto"))).join("\n")
+        output::group(&handover_lines(&items, vs(&r, "denden"), truthy(r.get("auto"))))
     );
     json!({ "decision": "block", "reason": reason })
 }
@@ -1268,11 +1397,13 @@ fn main() {
         "check" => cmd_check(&pos, &opts),
         "watch" => cmd_watch(&pos, &opts),
         "stop" => cmd_stop(&pos, &opts),
+        "link" => cmd_link(),
         _ => {
             println!("{}", help());
             std::process::exit(1);
         }
     }
+    output::flush();
     std::process::exit(0);
 }
 

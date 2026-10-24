@@ -209,26 +209,96 @@ pub fn read_stdin() -> String {
     s
 }
 
-/// Reads a line from the terminal without echoing it (an invitation code typed by the user).
+/// An invitation code typed or pasted in the user's own terminal. It is not echoed, but its start
+/// and end show as it comes, the middle masked (`denden_Ab3****************9fQ2`), so that a paste
+/// can be seen. Ctrl+C stops, Backspace and Ctrl+U correct.
 pub fn ask_hidden(question: &str) -> String {
-    eprint!("{question}");
-    let _ = std::io::stderr().flush();
-    let restore = echo_off();
-    let mut line = String::new();
-    let _ = std::io::stdin().read_line(&mut line);
+    let mut code = String::new();
+    let mut shown = 0;
+    let draw = |code: &str, shown: &mut usize| {
+        let m = masked(code);
+        let pad = " ".repeat(shown.saturating_sub(m.chars().count()));
+        eprint!("\r{question}{m}{pad}\r{question}{m}");
+        let _ = std::io::stderr().flush();
+        *shown = m.chars().count();
+    };
+    draw(&code, &mut shown);
+    let restore = raw_mode();
+    let mut stdin = std::io::stdin();
+    let mut byte = [0u8; 1];
+    loop {
+        match stdin.read(&mut byte) {
+            Ok(1) => {}
+            _ => break,
+        }
+        match byte[0] {
+            b'\r' | b'\n' => break,
+            0x03 => {
+                restore();
+                eprintln!();
+                std::process::exit(130);
+            }
+            0x08 | 0x7f => {
+                code.pop();
+            }
+            0x15 => code.clear(),
+            0x1b => {
+                // An escape sequence (an arrow key, a bracketed paste marker): skipped.
+                if stdin.read(&mut byte).is_ok_and(|n| n == 1) && byte[0] == b'[' {
+                    while stdin.read(&mut byte).is_ok_and(|n| n == 1) && !(0x40..=0x7e).contains(&byte[0]) {}
+                }
+            }
+            c if c.is_ascii_graphic() => code.push(c as char),
+            _ => {}
+        }
+        draw(&code, &mut shown);
+    }
     restore();
     eprintln!();
-    line.trim_end_matches(['\r', '\n']).to_string()
+    code
 }
 
+/// Puts `text` in the clipboard of the computer this terminal runs on, with the OSC 52 sequence
+/// (Windows Terminal, iTerm2, kitty, WezTerm; inside tmux, with set-clipboard or allow-passthrough
+/// on). No answer comes back: false when it was not even tried.
+pub fn osc52(text: &str) -> bool {
+    if cfg!(windows) && std::env::var_os("WT_SESSION").is_none() {
+        return false; // the old Windows console would print the sequence
+    }
+    let seq = format!("\x1b]52;c;{}\x07", base64::engine::general_purpose::STANDARD.encode(text));
+    let mut out = std::io::stdout().lock();
+    if std::env::var_os("TMUX").is_some() {
+        let _ = write!(out, "\x1bPtmux;{}\x1b\\", seq.replace('\x1b', "\x1b\x1b"));
+    }
+    let _ = write!(out, "{seq}");
+    let _ = out.flush();
+    true
+}
+
+/// The start and the end of a code, the middle as stars: enough to see it arrived, not to use it.
+pub fn masked(code: &str) -> String {
+    let c: Vec<char> = code.chars().collect();
+    let (head, tail) = (10, 4);
+    if c.len() <= head {
+        return code.to_string();
+    }
+    let start: String = c[..head].iter().collect();
+    if c.len() <= head + tail {
+        return format!("{start}{}", "*".repeat(c.len() - head));
+    }
+    let end: String = c[c.len() - tail..].iter().collect();
+    format!("{start}{}{end}", "*".repeat((c.len() - head - tail).min(16)))
+}
+
+/// No echo, no line editing, no signal on Ctrl+C (handled by the caller): one byte at a time.
 #[cfg(windows)]
-fn echo_off() -> impl FnOnce() {
-    use windows_sys::Win32::System::Console::{ENABLE_ECHO_INPUT, GetConsoleMode, GetStdHandle, STD_INPUT_HANDLE, SetConsoleMode};
+fn raw_mode() -> impl FnOnce() {
+    use windows_sys::Win32::System::Console::{ENABLE_ECHO_INPUT, ENABLE_LINE_INPUT, ENABLE_PROCESSED_INPUT, GetConsoleMode, GetStdHandle, STD_INPUT_HANDLE, SetConsoleMode};
     let h = unsafe { GetStdHandle(STD_INPUT_HANDLE) };
     let mut mode = 0u32;
     let ok = unsafe { GetConsoleMode(h, &mut mode) } != 0;
     if ok {
-        unsafe { SetConsoleMode(h, mode & !ENABLE_ECHO_INPUT) };
+        unsafe { SetConsoleMode(h, mode & !(ENABLE_ECHO_INPUT | ENABLE_LINE_INPUT | ENABLE_PROCESSED_INPUT)) };
     }
     move || {
         if ok {
@@ -238,12 +308,14 @@ fn echo_off() -> impl FnOnce() {
 }
 
 #[cfg(unix)]
-fn echo_off() -> impl FnOnce() {
+fn raw_mode() -> impl FnOnce() {
     let mut t: libc::termios = unsafe { std::mem::zeroed() };
     let ok = unsafe { libc::tcgetattr(0, &mut t) } == 0;
     let saved = t;
     if ok {
-        t.c_lflag &= !libc::ECHO;
+        t.c_lflag &= !(libc::ECHO | libc::ICANON | libc::ISIG);
+        t.c_cc[libc::VMIN] = 1;
+        t.c_cc[libc::VTIME] = 0;
         unsafe { libc::tcsetattr(0, libc::TCSANOW, &t) };
     }
     move || {
@@ -263,6 +335,15 @@ pub fn is_local_page(url: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_code_shows_its_ends_only() {
+        assert_eq!(masked(""), "");
+        assert_eq!(masked("denden_"), "denden_");
+        assert_eq!(masked("denden_Ab3x9"), "denden_Ab3**");
+        let code = format!("denden_{}9fQ2", "x".repeat(50));
+        assert_eq!(masked(&code), format!("denden_xxx{}9fQ2", "*".repeat(16)));
+    }
 
     #[test]
     fn page_renders_without_stray_text() {

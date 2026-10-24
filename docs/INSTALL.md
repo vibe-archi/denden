@@ -75,7 +75,7 @@ Then follow section 1 with that folder in place of `vibe-archi/denden@release`, 
 
 In a conversation: `/denden:im create my-project as coord` (Claude) or `$im create my-project as coord` (Codex).
 
-To let another machine in, run `/denden:im invite` on a machine of the channel: a local page opens, with a button that copies the code. On the new machine, run `/denden:im join my-project as <name>` in a conversation: a local page opens there too; paste the code with Ctrl+V and press Enter. On a server without a desktop, there is no page: the conversation gives you a `denden join my-project` command to run in a terminal, outside the AI, where the code is typed hidden.
+To let another machine in, run `/denden:im invite` on a machine of the channel: a local page opens, with a button that copies the code. On the new machine, run `/denden:im join my-project as <name>` in a conversation: a local page opens there too; paste the code with Ctrl+V and press Enter. On a server without a desktop, there is no page: the conversation gives you a command to run in a terminal, outside the AI, `denden invite my-project --print` on the inviting machine and `denden join my-project` on the new one. The code shows in the first terminal (and goes to your clipboard when the terminal allows it: Windows Terminal, iTerm2, kitty, WezTerm, tmux with `set-clipboard on`); paste it in the second, where only its start and end show. Run `<plugin folder>/skills/im/denden link` once on such a server to type just `denden`.
 
 The code is valid for 20 minutes and the invitation page stays open for 15.
 
