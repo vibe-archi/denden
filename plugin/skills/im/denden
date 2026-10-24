@@ -4,7 +4,11 @@
 # On Windows the build is denden.exe, right next to this file: a host that starts "./skills/im/denden"
 # without a shell (Codex starting the MCP server) resolves it to denden.exe by itself, so no shell is
 # needed there. One x64 build covers Windows on arm64 too.
-dir=$(dirname "$0")
+# Started through a link (`denden link` makes ~/.local/bin/denden), the builds are next to the
+# link's target, not next to the link.
+self=$0
+real=$(readlink -f "$0" 2>/dev/null) && [ -n "$real" ] && self=$real
+dir=$(dirname "$self")
 case "$(uname -s)" in
   MINGW* | MSYS* | CYGWIN*) bin="$dir/denden.exe" ;;
   *)

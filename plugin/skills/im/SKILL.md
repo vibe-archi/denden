@@ -37,6 +37,7 @@ In Claude Code, the arguments given to the skill are: `$ARGUMENTS`. In Codex, th
 | `keepalive on` / `keepalive off` | `DENDEN keepalive on` / `DENDEN keepalive off` |
 | `pause` / `resume` | `DENDEN pause` / `DENDEN resume`, then "Listening" below |
 | `detach`, `delete <name>`, `block <machine>`, `unblock <machine>`, `leave <channel>`, `check`, `open <url>` | the same `DENDEN` command |
+| `link` | `DENDEN link`: a short `denden` command for the user's own terminal (Linux, macOS) |
 
 `<to>` is a name (`back`), a list (`api,stress,db`) or `all` for the whole channel. Multi-line text: `DENDEN send <to> -` with the text on stdin (a quoted heredoc, `<<'EOF'`).
 
@@ -46,7 +47,16 @@ Right after you attach this conversation (`create ... as`, `join`), set its role
 
 Everything denden prints for the user has one of two shapes:
 
-- `> 🐌» (( ... ))`: information. Relay it to the user as it is, in the same shape (translate the words into the user's language if needed). Nothing else: no explanation of how denden works, no security briefing.
+- `> 🐌» (( ... ))`: information. Relay it to the user as it is, in the same shape (translate the words into the user's language if needed). Nothing else: no explanation of how denden works, no security briefing. Several lines at once (from one command or several in a row) come under one snail, each on its own line, and so does what you relay:
+
+  ```text
+  > 🐌» ((
+  > This conversation is stress-tester in data-server-room · online: dev-agent
+  > Role of stress-tester: k6 stress tests of the data server
+  > ))
+  ```
+
+  A single line stays `> 🐌» (( ... ))`. A table or a list inside the block is fine.
 - `🐌»  **...?**`: a decision only the user can make (the command exited with code 3). Ask it in that shape, wait for the answer, then run the command again with it:
   - a name: `DENDEN join <channel> as <name>` (also after `create` without a name);
   - "move it here": the same `join` with `--move`; "another name": `join <channel> as <other>`.
@@ -72,7 +82,9 @@ Invitation codes are copied and pasted only on a one-time local page (or typed i
 4. One line for the user: "Click to copy the code, then send it privately", or "Paste the code you received on the page".
 5. When the command finishes, relay its last lines. After a `join`, start listening.
 
-On a server without a browser (Linux without a desktop), `join` serves no page: it asks the user (exit code 3) to run `denden join <channel>` in a separate terminal, outside the AI, and to type the code there. Ask it, wait until they say it is done, then run the same `DENDEN join ...` again.
+On a server without a browser (Linux without a desktop), there is no page:
+- `join` asks the user (exit code 3) to run `denden join <channel>` in a separate terminal, outside the AI, and to paste the code there (its start and end show as it is pasted). Ask it, wait until they say it is done, then run the same `DENDEN join ...` again.
+- `invite` tells the user to run `denden invite <channel> --print` in their own terminal: the code shows there (and goes to their clipboard when their terminal allows it), never here. Relay that line; there is nothing else to run.
 
 ## Listening
 

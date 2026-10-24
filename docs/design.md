@@ -46,7 +46,14 @@ Everything that comes from denden has the same look, in Claude, in Codex or else
 
   > 🐌» (( ⚠ alice already existed in vibedoc-chan on another machine · … ))
 
-Several lines stay in one quote, the first one serving as a title. `who` adds a Markdown table under its title line.
+Several lines printed together, by one command or by several in a row, come under one snail, each on its own line; the AI does the same when it relays them. A single line keeps the short shape:
+
+> 🐌» ((
+> This conversation is stress-tester in data-server-room · online: dev-agent
+> Role of stress-tester: k6 stress tests of the data server
+> ))
+
+A list or a table (`who`) can go inside the block.
 
 Messages show up like this:
 
@@ -122,16 +129,27 @@ On the new machine, the command is the same as for a machine already in the chan
 
   > 🐌» (( srv-api is not in vibedoc-chan yet, and has no browser for the local page ))
 
-  🐌»  **In a separate terminal on srv-api, outside the AI, run ~/denden/plugin/skills/im/denden join vibedoc-chan and type the invitation code there. Tell me when it is done.**
+  🐌»  **In a separate terminal on srv-api, outside the AI, run denden join vibedoc-chan and paste the invitation code there. Tell me when it is done.**
 
   ```text
   $ denden join vibedoc-chan
-  Invitation code: (hidden)
+  Invitation code: denden_eyJ***************9fQ2
+  ✓ invitation code (88 characters)
   Joining vibedoc-chan, invited by laptop-ak [a1b2 c3d4]...
+  Looking for vibedoc-chan on the network... (6 s)
   srv-api joined vibedoc-chan. Attach a conversation with /denden:im join vibedoc-chan as <name>.
   ```
 
-  The user then tells the conversation, which runs the same `join` again, this time without a code.
+  The code is not echoed, but its start and end show as it is pasted, so the user sees it arrived; a paste that is not an invitation code is asked again. While the machine waits to be admitted, a line says where it stands. The user then tells the conversation, which runs the same `join` again, this time without a code.
+
+- **Inviting from a server without a browser** works the same way: the conversation serves no page and points to the user's own terminal.
+
+  > 🐌» ((
+  > srv-api has no browser for the invitation page
+  > In your own terminal on srv-api, outside the AI, run: denden invite vibedoc-chan --print · the code shows there, never in this conversation · single use, valid 20 min
+  > ))
+
+  `--print` shows the code on a line of its own, easy to select, with its expiry time and the command for the new machine, and also sends it to the clipboard of the user's computer when the terminal allows it (OSC 52: Windows Terminal, iTerm2, kitty, WezTerm, tmux with `set-clipboard on`). On a server, `denden link` makes the short `denden` command (a link in `~/.local/bin`) once, instead of the plugin's long path.
 
 Members are told when a machine arrives, because it matters for security. The notice reaches the conversations attached to the channel without waking them, with their next messages:
 
@@ -147,7 +165,9 @@ The name of a channel is local to each machine: it is the one the user types in 
 
 **You:** `/denden:im who`
 
-> 🐌» (( vibedoc-chan · 6 denden on 4 machine(s) ))
+> 🐌» ((
+> vibedoc-chan · 6 denden on 4 machine(s)
+> ))
 
 | denden | machine | role | state |
 |---|---|---|---|
@@ -214,13 +234,12 @@ When the AI has the idea itself:
 
 ### 4.8 Messages that arrived while away
 
-> 🐌» (( 3 messages arrived while you were away ))
->
-> 🐌» (( coord · late, sent 2 h ago : Deploy the server ))
->
-> 🐌» (( back · reply expected #c4d5e6 · late, sent 1 h 20 min ago : Is the users schema migrated? ))
->
-> 🐌» (( coord · to all · late, sent 1 h 05 min ago : Freeze on main at 18:00 ))
+> 🐌» ((
+> 3 messages arrived while you were away
+> coord · late, sent 2 h ago : Deploy the server
+> back · reply expected #c4d5e6 · late, sent 1 h 20 min ago : Is the users schema migrated?
+> coord · to all · late, sent 1 h 05 min ago : Freeze on main at 18:00
+> ))
 
 🐌»  **Which ones should I handle? All, some, or none?**
 
@@ -295,6 +314,7 @@ All of them are used in the conversation, as `/denden:im <command>` (Claude Code
 | `block <machine>` / `unblock <machine>` | ignores a machine, on this machine only |
 | `leave <channel>` | this machine leaves the channel |
 | `check` | full report on the install and the protections, only on request |
+| `link` | in the user's own terminal (Linux, macOS): a short `denden` command, instead of the plugin's path |
 
 What `join` does:
 - **the machine is not a member yet**: it asks for the invitation code, on a local page or in a separate terminal;
@@ -505,7 +525,7 @@ Validated during the agent-im trials, and kept as they were:
 
 The open points of the discussion, and what was chosen (details in [architecture.md](architecture.md)):
 1. **Language of the fixed texts**: English. The AI relays these lines in the user's language, keeping the `> 🐌» (( … ))` shape. The local pages follow the browser's language (English or French).
-2. **Outputs on several lines** (`who`, late messages): one quote, the first line as a title; `who` adds a table.
+2. **Outputs on several lines** (`who`, late messages, several commands in a row): one block under one snail, `> 🐌» ((` … `> ))`; `who` puts its table in it.
 3. **Internal commands**, used by the AI and the hooks, not shown to the user: `inbox`, `watch` (`--once` for silent mode), `reply <id> <text>`, `hook-prompt`, `hook-stop`, `mcp`, `stop`. A reply is attached to its question through the `#id` shown with the question.
 4. **New machine notice**: it goes to every conversation attached to the channel, on the machines that see the newcomer arrive, without waking them.
 5. **Sensitive commands**: `join`, `detach`, `delete`, `leave`, `wakes` and `keepalive` were added (see 7.4).
@@ -555,3 +575,5 @@ When a decision is up to the user, the CLI does not wait for input: it prints th
 | 36 | A message handed over more than an hour after it was sent: never handled without the user's go-ahead |
 | 37 | Claude listens in silent mode (a background command that ends on a message) by default; the Monitor is the fallback |
 | 38 | `pause` / `resume`: no listener and no wake-up while paused, messages wait for the user's next message here |
+| 39 | Several lines at once come under one snail: `> 🐌» ((`, the lines, `> ))` |
+| 40 | Servers without a browser: the pasted code shows its ends, `invite` points to `denden invite --print` in the user's terminal (code also sent to the clipboard), `join` shows its progress, `denden link` makes the short command |
