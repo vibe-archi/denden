@@ -108,9 +108,76 @@ pub fn ago(now: u64, then: u64) -> String {
     }
 }
 
+/// A length of time for a person: "30 min", "2 h", "1 h 30 min".
+pub fn span(ms: u64) -> String {
+    let min = ms.div_ceil(60_000);
+    match (min / 60, min % 60) {
+        (0, m) => format!("{m} min"),
+        (h, 0) => format!("{h} h"),
+        (h, m) => format!("{h} h {m} min"),
+    }
+}
+
+/// When `ms` comes, seen from `now` (a day at most): "18:42", or "tomorrow 09:10".
+pub fn until(now: u64, ms: u64) -> String {
+    let (a, b) = (local(now), local(ms));
+    let hm = fmt_hm(ms);
+    if (a.year, a.month, a.day) == (b.year, b.month, b.day) { hm } else { format!("tomorrow {hm}") }
+}
+
+/// A length of time typed by a person, in milliseconds: "45m", "90min", "2h", "1h30", "1h30m",
+/// "1d". None when it is not one.
+pub fn parse_span(text: &str) -> Option<u64> {
+    const MIN: u64 = 60_000;
+    const HOUR: u64 = 60 * MIN;
+    let text = text.to_ascii_lowercase();
+    let mut chars = text.chars().filter(|c| !c.is_whitespace()).peekable();
+    let (mut total, mut last) = (0u64, 0u64);
+    while chars.peek().is_some() {
+        let mut num = String::new();
+        while let Some(c) = chars.next_if(char::is_ascii_digit) {
+            num.push(c);
+        }
+        let mut unit = String::new();
+        while let Some(c) = chars.next_if(char::is_ascii_alphabetic) {
+            unit.push(c);
+        }
+        let n: u64 = num.parse().ok()?;
+        let size = match unit.as_str() {
+            "m" | "min" | "mins" | "minute" | "minutes" => MIN,
+            "h" | "hr" | "hrs" | "hour" | "hours" => HOUR,
+            "d" | "day" | "days" => 24 * HOUR,
+            // "1h30": a bare number after hours counts minutes.
+            "" if last == HOUR => MIN,
+            _ => return None,
+        };
+        total = total.checked_add(n.checked_mul(size)?)?;
+        last = size;
+    }
+    (total > 0).then_some(total)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn spans_read_and_parse() {
+        let m = 60_000;
+        assert_eq!(span(30 * m), "30 min");
+        assert_eq!(span(120 * m), "2 h");
+        assert_eq!(span(90 * m), "1 h 30 min");
+        assert_eq!(parse_span("45m"), Some(45 * m));
+        assert_eq!(parse_span("90min"), Some(90 * m));
+        assert_eq!(parse_span("2h"), Some(120 * m));
+        assert_eq!(parse_span("1h30"), Some(90 * m));
+        assert_eq!(parse_span("1h 30m"), Some(90 * m));
+        assert_eq!(parse_span("1d"), Some(1440 * m));
+        assert_eq!(parse_span("24 hours"), Some(1440 * m));
+        for bad in ["", "2", "30s", "h", "1w", "-1h", "0m"] {
+            assert_eq!(parse_span(bad), None, "{bad}");
+        }
+    }
 
     #[test]
     fn ago_reads_well() {

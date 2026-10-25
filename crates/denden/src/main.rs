@@ -43,7 +43,8 @@ Usage, from a conversation (the skill passes --session for Claude; Codex sets CO
   denden join <channel> [as <name>]   attach this conversation to a channel (--move: take the name
                                       from another conversation here; asks for the invitation code
                                       on a local page when this machine is not in the channel yet)
-  denden invite                       a single-use invitation code for a new machine, on a local page
+  denden invite [--for <time>]        a single-use invitation code for a new machine, on a local page
+                                      (valid 30 min, or the time given: 45m, 2h, up to 24h)
   denden open <url>                   open a denden local page in the system browser
   denden who                          the denden of the channel: machine, role, state
   denden send <to> <text>             send without waiting for a reply (<to>: name, a,b,c, or all)
@@ -60,6 +61,8 @@ Usage, from a conversation (the skill passes --session for Claude; Codex sets CO
   denden leave <channel>              this machine leaves the channel
   denden check                        a full report of the installation and its protections
   denden link                         a short `denden` command in ~/.local/bin (Linux, macOS)
+  denden ui                           this machine's dashboard in the browser: channels, denden,
+                                      conversations, messages (read only)
 
 In your own terminal, outside any AI: denden join <channel> (the code is typed hidden).
 Internal (agents and hooks): inbox, reply <id> <text>, watch, hook-prompt, hook-stop, mcp, stop.
@@ -676,6 +679,59 @@ fn link_tip() -> String {
     if cmd == "denden" || cfg!(windows) { String::new() } else { format!(" (tip: run {cmd} link once, then it is just denden)") }
 }
 
+/// `denden ui`: the dashboard. Its address opens every message of this machine, so it never goes to
+/// an agent: from a conversation (or with no terminal) the browser opens and nothing is printed; in
+/// the user's own terminal it is printed, with the SSH tunnel on a server without a desktop.
+fn cmd_ui(opts: &Opts) {
+    let h = here(opts);
+    let for_agent = h.conv.is_some() || !std::io::stdout().is_terminal();
+    let machine = machine_name();
+    if for_agent && no_display() {
+        say(info(&format!("{machine} has no browser for the dashboard")));
+        say(info(&format!(
+            "In your own terminal on {machine}, outside the AI, run: {} ui · it shows the address and the SSH tunnel to open it on your computer{}",
+            own_command(),
+            link_tip()
+        )));
+        return;
+    }
+    let r = ok(call("POST", "/ui", Some(&json!({})), 10000));
+    let Some(port) = daemon_info(&home()).map(|i| i.port) else { fail("the daemon is not running") };
+    let url = format!("http://127.0.0.1:{port}{}", vs(&r, "path"));
+    let no_browser = flag(opts, "no-browser");
+    if for_agent {
+        if !no_browser && ui::open_browser(&url, true) {
+            say(info("Dashboard opened in your browser · read only, live · it stays valid while the tab is open (12 h at most)"));
+        } else {
+            say(info(&format!("No browser could be opened · in your own terminal, outside the AI, run: {} ui", own_command())));
+        }
+        return;
+    }
+    let opened = !no_display() && !no_browser && ui::open_browser(&url, true);
+    println!();
+    println!("denden dashboard · {machine}");
+    println!();
+    println!("  {url}");
+    println!();
+    if opened {
+        println!("Opened in your browser.");
+    } else if no_display() {
+        let user = std::env::var("USER").unwrap_or_else(|_| "you".into());
+        // SSH_CONNECTION: client address, client port, server address, server port.
+        let host = std::env::var("SSH_CONNECTION").ok().and_then(|c| c.split_whitespace().nth(2).map(str::to_string)).unwrap_or_else(|| machine.clone());
+        println!("On your computer, open a tunnel to this server (with the address you use to reach it):");
+        println!();
+        println!("  ssh -N -L {port}:127.0.0.1:{port} {user}@{host}");
+        println!();
+        println!("then open the address above in your browser there.");
+    } else {
+        println!("Open it in your browser.");
+    }
+    let first = if opened { "" } else { "Open it within 10 minutes: then it " };
+    let stays = if opened { "It stays" } else { "stays" };
+    println!("{first}{stays} valid while its tab is open, 12 hours at most. It shows every message of this machine: keep it out of AI conversations.");
+}
+
 /// Where `denden link` puts the short command.
 fn short_link() -> PathBuf {
     home_dir().join(".local").join("bin").join("denden")
@@ -774,6 +830,14 @@ fn cmd_invite(pos: &[String], opts: &Opts) {
     if flag(opts, "print") && !std::io::stdout().is_terminal() {
         fail("--print only works in your own terminal: the code must not land in an AI conversation");
     }
+    let given = opts.get("for").filter(|v| !v.is_empty());
+    let ttl = given.map(|v| match time::parse_span(v) {
+        Some(t) if t > proto::INVITE_MAX => fail("an invitation lasts 24 h at most"),
+        Some(t) if t < 60_000 => fail("an invitation lasts at least 1 min"),
+        Some(t) => t,
+        None => fail(&format!("\"{v}\" is not a length of time: say how long the invitation lasts, like 45m, 2h or 24h")),
+    });
+    let valid = time::span(ttl.unwrap_or(proto::INVITE_TTL));
     if h.conv.is_some() && no_display() && !flag(opts, "print") {
         // A server without a desktop: no page; the code shows in the user's own terminal.
         let st = call("GET", &q("/status", &[("conv", h.conv.as_deref().unwrap_or("")), ("label", &label)]), None, 10000);
@@ -781,16 +845,17 @@ fn cmd_invite(pos: &[String], opts: &Opts) {
         let l = if l.is_empty() { "<channel>".to_string() } else { l };
         say(info(&format!("{} has no browser for the invitation page", machine_name())));
         say(info(&format!(
-            "In your own terminal on {}, outside the AI, run: {} invite {l} --print · the code shows there, never in this conversation · single use, valid 20 min{}",
+            "In your own terminal on {}, outside the AI, run: {} invite {l}{} --print · the code shows there, never in this conversation · single use, valid {valid}{}",
             machine_name(),
             own_command(),
+            given.map(|v| format!(" --for {v}")).unwrap_or_default(),
             link_tip()
         )));
         return;
     }
-    let r = ok(call("POST", "/invite", Some(&json!({ "conv": h.conv, "label": label })), 10000));
+    let r = ok(call("POST", "/invite", Some(&json!({ "conv": h.conv, "label": label, "ttl": ttl })), 10000));
     let code = vs(&r, "code").to_string();
-    let (label, until) = (vs(&r, "label").to_string(), time::fmt_hm(vu(&r, "expires")));
+    let (label, until) = (vs(&r, "label").to_string(), time::until(now_ms(), vu(&r, "expires")));
     if flag(opts, "print") {
         // On its own line, easy to select; and sent to the user's clipboard when the terminal allows it.
         let copied = ui::osc52(&code);
@@ -820,9 +885,9 @@ fn cmd_invite(pos: &[String], opts: &Opts) {
         },
         |url| {
             if !no_browser && ui::open_browser(url, false) {
-                say_now(info("Invitation opened in your browser · click to copy the code · single use, valid 20 min"));
+                say_now(info(&format!("Invitation opened in your browser · click to copy the code · single use, valid {valid}")));
             } else {
-                say_now(info(&format!("Invitation page: {url} · open it in the built-in browser, then click to copy the code · single use, valid 20 min")));
+                say_now(info(&format!("Invitation page: {url} · open it in the built-in browser, then click to copy the code · single use, valid {valid}")));
             }
         },
         Duration::from_millis(proto::INVITE_PAGE),
@@ -1151,7 +1216,7 @@ fn cmd_watch(_pos: &[String], opts: &Opts) {
     if truthy(st["conv"].get("paused")) {
         return emit(&info(crate::daemon::PAUSED));
     }
-    let path = q("/watch", &[("conv", &conv)]);
+    let path = q("/watch", &[("conv", &conv), ("once", if once { "1" } else { "" })]);
     loop {
         ensure_daemon();
         if let Some(info) = daemon_info(&home()) {
@@ -1287,7 +1352,7 @@ fn cmd_hook_stop() -> ! {
 // ---------- entry point ----------
 
 fn parse_args(argv: &[String]) -> (Opts, Vec<String>) {
-    const WITH_VALUE: [&str; 6] = ["as", "timeout", "n", "file", "session", "label"];
+    const WITH_VALUE: [&str; 7] = ["as", "timeout", "n", "file", "session", "label", "for"];
     const FLAGS: [&str; 8] = ["json", "peek", "force", "print", "help", "no-browser", "move", "once"];
     let mut opts = Opts::new();
     let mut pos = Vec::new();
@@ -1398,6 +1463,7 @@ fn main() {
         "watch" => cmd_watch(&pos, &opts),
         "stop" => cmd_stop(&pos, &opts),
         "link" => cmd_link(),
+        "ui" => cmd_ui(&opts),
         _ => {
             println!("{}", help());
             std::process::exit(1);

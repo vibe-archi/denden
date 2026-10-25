@@ -1,0 +1,594 @@
+<!doctype html>
+<!--
+  denden dashboard: served by the daemon at /ui/<token> (crates/denden/src/daemon.rs, ui_route), which
+  replaces the two placeholders NONCE and CONFIG, each written once below between double braces
+  (CONFIG is JSON with "<" escaped, so it cannot close the script tag).
+  Read only: it polls GET <api> every few seconds with the x-denden header, sending what it already has
+  (after=<cid>:<seq>,...), and gets back only what is new. Message texts come from other machines:
+  they are only ever set as textContent, never as HTML.
+  Layout: channels with this machine's denden on the left, the chosen channel's messages in the
+  middle, who is in it (by machine) on the right. Markers: 📡 channel, 💻 machine, 🐌 denden,
+  💬 conversation, ✨ AI.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>denden dashboard</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext x='16' y='25' font-size='24' text-anchor='middle'%3E%F0%9F%90%8C%3C/text%3E%3C/svg%3E">
+<style>
+:root {
+  --bg: #0b0d14; --bg2: #11152a; --panel: rgba(255, 255, 255, .035); --panel2: rgba(255, 255, 255, .065);
+  --fg: #eef0f7; --muted: #9aa1b8; --faint: #646a82; --line: rgba(255, 255, 255, .09);
+  --a1: #35d0ba; --a2: #8b7bff; --ok: #3ddc97; --warn: #f5b95b; --err: #ff6b7d; --sat: 62%; --lum: 72%;
+}
+@media (prefers-color-scheme: light) {
+  :root { --bg: #f4f5fa; --bg2: #e6e9f5; --panel: rgba(255, 255, 255, .75); --panel2: rgba(20, 24, 40, .055);
+    --fg: #141726; --muted: #5a6176; --faint: #8b91a5; --line: rgba(20, 24, 40, .1);
+    --a1: #0fa38d; --a2: #6a5af9; --ok: #12935e; --warn: #a8690f; --err: #d43a4f; --sat: 55%; --lum: 36%; }
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  color: var(--fg); background: var(--bg); background-image: radial-gradient(1100px 500px at 20% -10%, var(--bg2), transparent);
+  font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing: antialiased;
+  display: grid; grid-template-rows: auto minmax(0, 1fr); overflow: hidden;
+}
+code, .mono { font: 12.5px ui-monospace, "Cascadia Code", Consolas, monospace; }
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--a1); outline-offset: 2px; }
+[hidden] { display: none !important; }
+.ok { color: var(--ok); } .warn { color: var(--warn); } .err { color: var(--err); } .muted { color: var(--muted); } .faint { color: var(--faint); }
+.dot::before { content: "●"; margin-right: 5px; font-size: 10px; vertical-align: 1px; }
+
+/* top bar */
+.top { display: flex; align-items: center; gap: 12px; padding: 11px 20px; border-bottom: 1px solid var(--line); }
+.logo { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; font-size: 17px; line-height: 1; background: linear-gradient(135deg, var(--a1), var(--a2)); flex: none; }
+.top h1 { margin: 0; font-size: 15px; font-weight: 650; }
+.top .machine { color: var(--muted); font-weight: 500; }
+.live { margin-left: auto; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); animation: pulse 2s infinite; }
+.live.down .pulse { background: var(--err); animation: none; }
+@keyframes pulse { 50% { opacity: .35; } }
+
+/* layout: three columns when wide, two (who's here under the channels) in between, one when narrow */
+.layout { display: grid; grid-template-columns: 290px minmax(0, 1fr) 290px; grid-template-areas: "side main who"; min-height: 0; }
+aside { display: contents; }
+#side { grid-area: side; border-right: 1px solid var(--line); }
+#who { grid-area: who; border-left: 1px solid var(--line); }
+#side, #who { overflow: auto; overflow-x: hidden; padding: 16px 12px 28px; }
+main { grid-area: main; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+@media (max-width: 1179px) {
+  .layout { grid-template-columns: 290px minmax(0, 1fr); grid-template-areas: "side main"; }
+  aside { display: block; grid-area: side; overflow: auto; border-right: 1px solid var(--line); padding-bottom: 28px; }
+  #side, #who { overflow: visible; border: 0; padding-bottom: 8px; }
+  #who { border-top: 1px solid var(--line); margin: 8px 12px 0; padding: 16px 0 0; }
+}
+@media (max-width: 759px) {
+  body { overflow: auto; display: block; }
+  .layout { display: block; }
+  aside { border-right: 0; border-bottom: 1px solid var(--line); }
+  .feed { overflow: visible !important; }
+}
+.label { margin: 0 6px 10px; font-size: 11.5px; font-weight: 600; letter-spacing: .02em; color: var(--faint); }
+.hint { color: var(--muted); font-size: 12.5px; margin: 6px 0 0; }
+.hint code { color: var(--fg); display: block; margin-top: 2px; overflow-wrap: anywhere; }
+
+/* channels and this machine's denden */
+.chan { border-radius: 10px; padding: 6px; margin-bottom: 6px; }
+.chan.on { background: var(--panel2); }
+.chan-head { display: grid; grid-template-columns: 22px minmax(0, 1fr); align-items: start; }
+.fold { appearance: none; border: 0; background: none; cursor: pointer; color: var(--faint); width: 22px; height: 24px; padding: 0; border-radius: 6px; font-size: 11px; }
+.fold:hover { color: var(--fg); }
+.row { appearance: none; border: 0; background: none; text-align: left; width: 100%; cursor: pointer; border-radius: 8px; padding: 3px 6px; display: block; }
+.row:hover { background: var(--panel2); }
+.row.sel { background: color-mix(in srgb, var(--a2) 16%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--a2) 45%, transparent); }
+.line { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sub { display: block; color: var(--muted); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.state { display: block; font-size: 12px; }
+.line .state { display: inline; margin-left: 2px; white-space: nowrap; }
+.count { margin-left: auto; flex: none; min-width: 20px; padding: 0 7px; border-radius: 10px; font-size: 11.5px; font-weight: 650; line-height: 20px; text-align: center; background: var(--a2); color: #fff; }
+.dens { margin: 4px 0 2px 22px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px; }
+
+/* who's here */
+.mach { margin: 0 6px 16px; }
+.mach-name { font-weight: 600; }
+.mach > .state { margin: 0 0 4px 24px; }
+.mach .dens { margin-left: 18px; }
+.blocked { border-top: 1px solid var(--line); padding-top: 12px; margin: 4px 6px 0; color: var(--faint); }
+
+/* the channel and its messages */
+.head { padding: 14px 22px 12px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.head h2 { margin: 0; font-size: 18px; font-weight: 650; }
+.filter { appearance: none; margin-left: auto; border: 0; cursor: pointer; border-radius: 12px; padding: 2px 10px; font-size: 12.5px; background: color-mix(in srgb, var(--a2) 18%, transparent); color: var(--fg); }
+.feed { flex: 1; min-height: 0; overflow: auto; padding: 4px 22px 28px; }
+.day { display: flex; align-items: center; gap: 12px; margin: 18px 0 6px; color: var(--faint); font-size: 11.5px; font-weight: 600; }
+.day::before, .day::after { content: ""; height: 1px; flex: 1; background: var(--line); }
+.msg { padding: 7px 10px; border-radius: 10px; margin: 0 -10px; }
+.msg:hover { background: var(--panel); }
+.msg.more { padding-top: 0; margin-top: -4px; }
+.msg.flash { animation: flash 1.6s ease; }
+@keyframes flash { 0%, 40% { background: color-mix(in srgb, var(--a2) 22%, transparent); } }
+.meta { display: flex; align-items: baseline; flex-wrap: wrap; gap: 3px 8px; }
+.from { font-weight: 650; color: hsl(var(--h) var(--sat) var(--lum)); }
+.to { color: var(--muted); font-size: 12.5px; }
+.tag { font-size: 11.5px; line-height: 19px; padding: 0 8px; border-radius: 10px; white-space: nowrap; background: var(--panel2); color: var(--muted); }
+.tag.q { color: var(--a2); background: color-mix(in srgb, var(--a2) 15%, transparent); }
+.tag.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
+.tag.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 15%, transparent); }
+time { margin-left: auto; font-size: 11.5px; color: var(--faint); font-variant-numeric: tabular-nums; }
+.re { appearance: none; display: block; text-align: left; border: 0; border-left: 2px solid var(--line); background: none; cursor: pointer; margin: 3px 0; padding: 0 8px; color: var(--muted); font-size: 12.5px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.re:hover { color: var(--fg); border-left-color: var(--a2); }
+.text { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 1px; min-width: 0; }
+.text.cut { max-height: 21em; overflow: hidden; -webkit-mask-image: linear-gradient(#000 70%, transparent); mask-image: linear-gradient(#000 70%, transparent); }
+.toggle { appearance: none; border: 0; background: none; cursor: pointer; color: var(--a2); padding: 2px 0; font-size: 12.5px; }
+.waiting { font-size: 12px; color: var(--warn); margin-top: 2px; }
+.event { text-align: center; color: var(--muted); font-size: 12.5px; margin: 10px 0; overflow-wrap: anywhere; }
+.event.alert { color: var(--warn); }
+.none { display: grid; place-items: center; text-align: center; color: var(--muted); padding: 60px 20px; }
+.none b { color: var(--fg); font-size: 15px; display: block; margin-bottom: 6px; }
+.none code { color: var(--fg); }
+
+.gone { position: fixed; inset: 0; display: grid; place-items: center; padding: 16px; background: color-mix(in srgb, var(--bg) 80%, transparent); backdrop-filter: blur(6px); }
+.gone div { max-width: 420px; text-align: center; padding: 28px; border: 1px solid var(--line); border-radius: 16px; background: var(--bg); display: grid; gap: 10px; }
+.gone p { margin: 0; color: var(--muted); }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="logo" aria-hidden="true">🐌</div>
+  <h1>denden <span class="machine" id="machine"></span></h1>
+  <div class="live" id="live" role="status"><span class="pulse"></span><span id="clock">connecting…</span></div>
+</header>
+<div class="layout">
+  <aside>
+    <section id="side"><h3 class="label">Channels</h3><div id="channels"></div></section>
+    <section id="who" hidden><h3 class="label" id="who-title">Who's here</h3><div id="machines"></div></section>
+  </aside>
+  <main>
+    <div class="head" id="head" hidden>
+      <h2 id="title"></h2><span class="muted" id="summary"></span>
+      <button class="filter" id="filter" type="button" hidden></button>
+    </div>
+    <div class="feed" id="feed"></div>
+  </main>
+</div>
+<div class="gone" id="gone" hidden><div><b>This dashboard has expired</b><p>Its address lives while the page is open and the denden daemon runs, 12 hours at most. Run <code>denden ui</code> again, or <code>/denden:im ui</code> in a conversation.</p></div></div>
+<script type="application/json" id="cfg">{{CONFIG}}</script>
+<script nonce="{{NONCE}}">
+(() => {
+  const cfg = JSON.parse(document.getElementById('cfg').textContent)
+  const $ = (id) => document.getElementById(id)
+  // An element with its class and text; text only ever as textContent.
+  const el = (tag, cls, text) => {
+    const e = document.createElement(tag)
+    if (cls) e.className = cls
+    if (text != null) e.textContent = text
+    return e
+  }
+  const keep = {
+    get: (k) => { try { return sessionStorage.getItem(k) } catch { return null } },
+    set: (k, v) => { try { sessionStorage.setItem(k, v) } catch {} },
+  }
+
+  // cid -> { info, msgs, keys, answered, seq, count }: info is the last state the daemon sent, msgs
+  // the messages so far (the last 3000), answered the ids of questions a reply points to.
+  const chans = new Map()
+  let sel = keep.get('sel'), filter = keep.get('filter') || '', gone = false, fails = 0, since = 0, last = 0
+  let folded
+  try { folded = new Set(JSON.parse(keep.get('folded') || '[]')) } catch { folded = new Set() }
+  const opened = new Set()
+  const drawn = {}
+
+  const APPS = { claude: 'Claude Code', codex: 'Codex' }
+  const appName = (a) => APPS[a] || a
+  const hue = (s) => { let h = 0; for (const c of s) h = (h * 31 + c.codePointAt(0)) % 360; return h }
+  const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`
+  const folder = (p) => (p || '').split(/[\\/]/).filter(Boolean).pop() || ''
+  const day = (t) => {
+    const d = new Date(t), now = new Date()
+    if (d.toDateString() === now.toDateString()) return 'Today'
+    if (d.toDateString() === new Date(now - 864e5).toDateString()) return 'Yesterday'
+    return d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: d.getFullYear() === now.getFullYear() ? undefined : 'numeric' })
+  }
+  const clock = (t) => new Date(t).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+  const span = (ms) => {
+    const m = Math.max(1, Math.round(ms / 60000))
+    return m < 60 ? `${m} min` : m < 1440 ? `${Math.round(m / 60)} h` : plural(Math.round(m / 1440), 'day')
+  }
+  const ago = (t) => Date.now() - t < 60000 ? 'just now' : `${span(Date.now() - t)} ago`
+
+  // ---------- polling ----------
+
+  async function poll() {
+    if (gone) return
+    const after = [...chans].filter(([, c]) => c.seq != null).map(([cid, c]) => `${cid}:${c.seq}`).join(',')
+    try {
+      const r = await fetch(cfg.api + (after ? `?after=${after}` : ''), { headers: { 'x-denden': '1' }, cache: 'no-store' })
+      if (r.status === 410) return expire()
+      if (!r.ok) throw new Error(String(r.status))
+      apply(await r.json())
+      fails = 0
+      last = Date.now()
+    } catch {
+      if (!fails++) since = Date.now()
+      // Unreachable for a minute: the daemon stopped, and its addresses went with it.
+      if (Date.now() - since > 60000) return expire()
+    }
+    status()
+    setTimeout(poll, cfg.poll || 2000)
+  }
+
+  function expire() {
+    gone = true
+    $('gone').hidden = false
+    $('live').classList.add('down')
+    $('clock').textContent = 'expired'
+  }
+
+  function status() {
+    const down = fails >= 2
+    $('live').classList.toggle('down', down)
+    $('clock').textContent = down ? 'cannot reach the denden daemon on this machine, retrying…' : last ? `live · ${clock(last)}` : 'connecting…'
+  }
+
+  function apply(d) {
+    $('machine').textContent = d.machine ? `· 💻 ${d.machine}` : ''
+    const live = new Set()
+    for (const c of d.channels || []) {
+      live.add(c.cid)
+      let ch = chans.get(c.cid)
+      if (ch && ch.seq != null && c.seq < ch.seq) {
+        // Its history was reset: start over with a full load.
+        chans.set(c.cid, { info: c, msgs: [], keys: new Set(), answered: new Set(), seq: null, count: 0 })
+        continue
+      }
+      if (!ch) chans.set(c.cid, (ch = { msgs: [], keys: new Set(), answered: new Set(), seq: null, count: 0 }))
+      ch.info = c
+      for (const m of c.messages) {
+        const k = m.kind === 'event' ? `event/${m.seq}` : `${m.from}/${m.id}`
+        if (ch.keys.has(k)) continue
+        ch.keys.add(k)
+        ch.msgs.push(m)
+        if (m.re) ch.answered.add(m.re)
+        ch.count++
+      }
+      if (ch.msgs.length > 3000) ch.msgs.splice(0, ch.msgs.length - 3000)
+      ch.seq = c.seq
+    }
+    for (const cid of [...chans.keys()]) if (!live.has(cid)) chans.delete(cid)
+    if (!chans.has(sel)) {
+      sel = chans.keys().next().value ?? null
+      filter = ''
+    }
+    render()
+  }
+
+  // Each part is rebuilt only when what it shows changed, so focus and scrolling stay put; a
+  // focused row gets its focus back after a rebuild (rows carry data-key).
+  function part(name, data, draw) {
+    const sig = JSON.stringify(data)
+    if (drawn[name] === sig) return
+    drawn[name] = sig
+    const key = document.activeElement?.dataset?.key
+    draw()
+    if (key) [...document.querySelectorAll('[data-key]')].find((e) => e.dataset.key === key)?.focus()
+  }
+
+  function select(cid, who) {
+    sel = cid
+    filter = who
+    keep.set('sel', cid || '')
+    keep.set('filter', who)
+    render()
+  }
+
+  // ---------- states, in the user's words ----------
+
+  // A denden of this machine: how its conversation hears what comes.
+  function localState(d) {
+    const w = d.waiting ? ` · ${d.waiting} waiting` : ''
+    if (!d.conv) return { text: d.waiting ? `${d.waiting} waiting` : 'Nothing waiting', short: 'no conversation', tone: d.waiting ? 'warn' : 'faint', title: 'No conversation holds this denden: its messages wait for one to join as it' }
+    const c = d.conv
+    const how = `${c.how}${c.wakes ? `, up to ${c.wakes} wake-ups an hour` : ''}`
+    if (c.state === 'paused') return { text: `Paused${w}`, short: 'paused', tone: 'warn', title: 'Messages wait until the conversation resumes, or its user writes in it' }
+    if (c.state === 'listening') return { text: `Listening${c.auto ? ' · acts on its own' : ''}`, short: 'listening', tone: 'ok', title: `Hears messages right away (${how})${c.auto ? '. It acts on requests without asking its user first.' : ''}` }
+    return { text: `Gets messages at its next turn${w}`, short: 'next turn', tone: d.waiting ? 'warn' : 'muted', title: 'No listener runs right now: messages wait for its next turn' }
+  }
+
+  // A denden of another machine: all this machine knows is whether a conversation holds it.
+  function remoteState(d, m) {
+    if (!m || !m.online) return null
+    return d.active ? { short: 'online', tone: 'ok' } : { short: 'no conversation', tone: 'muted' }
+  }
+
+  // ---------- drawing ----------
+
+  function render() {
+    const list = [...chans.values()].map((c) => c.info).sort((a, b) => a.label.localeCompare(b.label))
+    part('channels', [list.map((c) => [c.cid, c.label, c.member, c.online, c.denden.filter((d) => d.mine)]), sel, filter, [...folded], Math.floor(Date.now() / 60000)], () => drawChannels(list))
+    const ch = chans.get(sel)
+    $('head').hidden = $('who').hidden = !ch
+    if (!ch) {
+      drawn.feed = null
+      const none = el('div', 'none')
+      none.append(el('b', null, 'Create your first channel'), document.createTextNode('In a conversation: '), el('code', null, '/denden:im create <channel> as <name>'))
+      $('feed').replaceChildren(none)
+      return
+    }
+    const c = ch.info
+    part('who', [c.cid, c.machines, c.denden, filter, Math.floor(Date.now() / 60000)], () => drawWho(c))
+    part('head', [c.cid, c.label, c.member, c.machines, c.denden.length, filter], () => drawHead(c))
+    part('feed', [c.cid, filter, ch.count, c.unseen, ch.answered.size, [...opened]], () => drawFeed(ch))
+  }
+
+  function drawChannels(list) {
+    const box = $('channels')
+    box.replaceChildren()
+    if (!list.length) box.append(el('p', 'hint', 'This machine is in no channel yet.'))
+    for (const c of list) {
+      const wrap = el('div', 'chan' + (c.cid === sel ? ' on' : ''))
+      const head = el('div', 'chan-head')
+      const mine = c.denden.filter((d) => d.mine).sort((a, b) => a.name.localeCompare(b.name))
+      const isFolded = folded.has(c.cid)
+      const fold = el('button', 'fold', isFolded ? '▶' : '▼')
+      fold.type = 'button'
+      fold.dataset.key = `fold/${c.cid}`
+      fold.setAttribute('aria-expanded', String(!isFolded))
+      fold.setAttribute('aria-label', isFolded ? `Show the denden of ${c.label}` : `Hide the denden of ${c.label}`)
+      fold.addEventListener('click', () => {
+        isFolded ? folded.delete(c.cid) : folded.add(c.cid)
+        keep.set('folded', JSON.stringify([...folded]))
+        render()
+      })
+      const row = el('button', 'row' + (c.cid === sel && !filter ? ' sel' : ''))
+      row.type = 'button'
+      row.dataset.key = `chan/${c.cid}`
+      const line = el('span', 'line')
+      line.append(el('span', null, '📡'), el('span', 'name', c.label))
+      const waiting = mine.reduce((n, d) => n + (d.waiting || 0), 0)
+      if (waiting) {
+        const n = el('span', 'count', String(waiting))
+        n.title = 'messages not yet seen by the conversations of this machine'
+        line.append(n)
+      }
+      const st = !c.member ? ['warn', 'Waiting to be admitted'] : c.online ? ['ok', `${plural(c.online, 'other machine')} online`] : ['faint', 'Nobody else online']
+      row.append(line, el('span', `state dot ${st[0]}`, st[1]))
+      row.addEventListener('click', () => select(c.cid, ''))
+      head.append(fold, row)
+      wrap.append(head)
+      if (!isFolded) {
+        const dens = el('div', 'dens')
+        if (!mine.length) {
+          const p = el('p', 'hint', 'No conversation of yours here yet')
+          p.append(el('code', null, `/denden:im join ${c.label} as …`))
+          dens.append(p)
+        }
+        for (const d of mine) dens.append(localRow(c, d))
+        wrap.append(dens)
+      }
+      box.append(wrap)
+    }
+  }
+
+  // 🐌 name / 💬 conversation · ✨ AI / state
+  function localRow(c, d) {
+    const b = el('button', 'row' + (c.cid === sel && filter === d.name ? ' sel' : ''))
+    b.type = 'button'
+    b.dataset.key = `mine/${c.cid}/${d.name}`
+    const line = el('span', 'line')
+    line.append(el('span', null, '🐌'), el('span', 'name', d.name))
+    b.append(line)
+    if (d.conv) {
+      const sub = el('span', 'sub', `💬 ${d.conv.title || folder(d.conv.cwd) || 'conversation'} · ✨ ${appName(d.conv.app)}`)
+      sub.title = `${d.conv.cwd ? `${d.conv.cwd} · ` : ''}active ${ago(d.conv.seen)}`
+      b.append(sub)
+    } else {
+      b.append(el('span', 'sub faint', '💬 no conversation'))
+    }
+    const st = localState(d)
+    const s = el('span', `state dot ${st.tone}`, st.text)
+    s.title = st.title
+    b.append(s)
+    b.addEventListener('click', () => select(c.cid, d.name))
+    return b
+  }
+
+  function drawWho(c) {
+    $('who-title').textContent = `Who's here · ${c.label}`
+    const box = $('machines')
+    box.replaceChildren()
+    const rank = (m) => m.me ? 0 : m.online ? 1 : m.connecting ? 2 : 3
+    const shown = c.machines.filter((m) => !m.blocked).sort((a, b) => rank(a) - rank(b) || (b.seen || 0) - (a.seen || 0) || a.name.localeCompare(b.name))
+    for (const m of shown) {
+      const sec = el('div', 'mach')
+      const name = el('div', 'line')
+      const n = el('span', 'mach-name', m.name)
+      n.title = `fingerprint ${m.id}`
+      name.append(el('span', null, '💻'), n)
+      const st = m.me ? ['faint', 'This machine'] : m.online ? ['ok', 'Online'] : m.connecting ? ['faint', 'Connecting…'] : ['faint', m.seen ? `Offline · last seen ${ago(m.seen)}` : 'Offline']
+      sec.append(name, el('span', `state ${m.me ? '' : 'dot '}${st[0]}`, st[1]))
+      const dens = el('div', 'dens')
+      for (const d of c.denden.filter((d) => d.machine === m.id).sort((a, b) => a.name.localeCompare(b.name))) {
+        const row = el('button', 'row' + (filter === d.name ? ' sel' : ''))
+        row.type = 'button'
+        row.dataset.key = `who/${c.cid}/${d.name}`
+        const line = el('span', 'line')
+        line.append(el('span', null, '🐌'), el('span', m.online || m.me ? 'name' : 'name muted', d.name))
+        const st = d.mine ? localState(d) : remoteState(d, m)
+        if (st) {
+          const s = el('span', `state dot ${st.tone}`, st.short)
+          if (st.title) s.title = st.title
+          line.append(s)
+        }
+        row.append(line)
+        const about = [d.app ? `✨ ${appName(d.app)}` : '', d.role].filter(Boolean).join(' · ')
+        if (about) row.append(el('span', 'sub', about))
+        row.addEventListener('click', () => select(c.cid, d.name))
+        dens.append(row)
+      }
+      sec.append(dens)
+      box.append(sec)
+    }
+    const blocked = c.machines.filter((m) => m.blocked)
+    if (blocked.length) {
+      const sec = el('div', 'blocked')
+      sec.append(el('div', 'label', 'Blocked on this machine'))
+      for (const m of blocked) {
+        const line = el('div', null, `💻 ${m.name}`)
+        line.title = `fingerprint ${m.id} · its messages are ignored here`
+        sec.append(line)
+      }
+      box.append(sec)
+    }
+  }
+
+  function drawHead(c) {
+    $('title').textContent = `📡 ${c.label}`
+    const machines = c.machines.filter((m) => !m.blocked)
+    const online = machines.filter((m) => !m.me && m.online).map((m) => m.name)
+    const who = online.length === 0 ? 'nobody else online' : online.length <= 2 ? `💻 ${online.join(', ')} online` : `${online.length} other machines online`
+    $('summary').textContent = !c.member ? 'waiting to be admitted' : `${plural(machines.length, 'machine')} · ${c.denden.length} denden · ${who}`
+    const f = $('filter')
+    f.hidden = !filter
+    f.textContent = `Only 🐌 ${filter} ✕`
+    f.title = 'Show every message of the channel'
+  }
+
+  $('filter').addEventListener('click', () => select(sel, ''))
+
+  // The feed follows the newest message until the reader scrolls up, and stays where they are then.
+  let lastFeed = null, stick = true
+  function drawFeed(ch) {
+    const box = $('feed'), c = ch.info
+    if (lastFeed !== `${c.cid}|${filter}`) stick = true
+    lastFeed = `${c.cid}|${filter}`
+    const at = box.scrollTop
+    box.replaceChildren()
+    const shown = ch.msgs.filter((m) => m.kind === 'event'
+      ? !filter || !m.d || m.d === filter
+      : !filter || m.from === filter || m.to === 'all' || (Array.isArray(m.to) && m.to.includes(filter)))
+    if (!shown.some((m) => m.kind !== 'event')) {
+      const none = el('div', 'none')
+      none.append(el('b', null, filter ? `No messages from or to 🐌 ${filter} yet` : 'No messages yet'), document.createTextNode('The messages of this machine’s denden show here.'))
+      box.append(none)
+    }
+    let current = '', prev = null
+    for (const m of shown) {
+      const dd = day(m.at)
+      if (dd !== current) {
+        box.append(el('div', 'day', (current = dd)))
+        prev = null
+      }
+      if (m.kind === 'event') {
+        box.append(el('div', 'event' + (m.alert ? ' alert' : ''), `${eventText(m)} · ${clock(m.at)}`))
+        prev = null
+        continue
+      }
+      // A message right after one with the same sender and recipients, nothing special: no header.
+      const plain = !m.ask && !m.re && !m.late
+      const more = plain && prev && prev.plain && prev.from === m.from && JSON.stringify(prev.to) === JSON.stringify(m.to) && m.at - prev.at < 5 * 60000
+      box.append(message(ch, m, more))
+      prev = { from: m.from, to: m.to, at: m.at, plain }
+    }
+    box.scrollTop = stick ? box.scrollHeight : at
+  }
+
+  function message(ch, m, more) {
+    const art = el('article', 'msg' + (more ? ' more' : ''))
+    art.dataset.id = m.id
+    art.style.setProperty('--h', hue(m.from || '?'))
+    if (!more) {
+      const meta = el('div', 'meta')
+      meta.append(el('span', 'from', `🐌 ${m.from || 'unknown'}`))
+      meta.append(el('span', 'to', m.to === 'all' ? '→ 📣 everyone' : `→ ${(Array.isArray(m.to) ? m.to : [m.to]).map((n) => `🐌 ${n}`).join(', ')}`))
+      if (m.ask) {
+        meta.append(el('span', 'tag q', '❓ question'))
+        meta.append(ch.answered.has(m.id) ? el('span', 'tag ok', '✅ answered') : el('span', 'tag warn', '⏳ waiting for an answer'))
+      }
+      if (m.late) {
+        const l = el('span', 'tag warn', `⚠️ delivered ${span(m.waited)} late`)
+        l.title = 'it waited on the sender’s machine until this one was online'
+        meta.append(l)
+      }
+      meta.append(stamp(m))
+      art.append(meta)
+    }
+    if (m.re) {
+      const q = el('button', 're', `↩️ answers: ${m.reText || 'an earlier question'}`)
+      q.type = 'button'
+      q.title = 'Show the question'
+      q.addEventListener('click', () => reveal(m.re))
+      art.append(q)
+    }
+    const key = `${m.from}/${m.id}`
+    const text = el('div', 'text', m.text ?? '')
+    if (more) {
+      const row = el('div', 'meta')
+      text.style.flex = '1'
+      row.append(text, stamp(m))
+      art.append(row)
+    } else {
+      art.append(text)
+    }
+    if ((m.text || '').split('\n').length > 15 || (m.text || '').length > 1500) {
+      const open = opened.has(key)
+      text.classList.toggle('cut', !open)
+      const t = el('button', 'toggle', open ? 'Show less' : 'Show more')
+      t.type = 'button'
+      t.addEventListener('click', () => {
+        opened.has(key) ? opened.delete(key) : opened.add(key)
+        stick = false
+        render()
+      })
+      art.append(t)
+    }
+    const unseen = ch.info.unseen?.[key]
+    if (unseen?.length) art.append(el('div', 'waiting', `⏳ not seen yet by ${unseen.map((d) => `🐌 ${d}`).join(', ')}`))
+    return art
+  }
+
+  // A channel event in the page's words when it is a known one, else as denden wrote it.
+  function eventText(m) {
+    const joined = /^New machine in .+?: (.+) \[([0-9a-f-]+)\], invited by (.+)$/.exec(m.text || '')
+    if (joined) return `💻 ${joined[1]} joined, invited by 💻 ${joined[3]}`
+    return `${m.alert && !/^⚠/.test(m.text) ? '⚠️ ' : ''}${m.text}`
+  }
+
+  function stamp(m) {
+    const t = el('time', null, clock(m.at))
+    t.dateTime = new Date(m.at).toISOString()
+    t.title = new Date(m.at).toLocaleString()
+    return t
+  }
+
+  // Scrolls to a question (showing every message first when the filter hides it), and marks it.
+  function reveal(id) {
+    const find = () => [...$('feed').querySelectorAll('article')].find((a) => a.dataset.id === id)
+    let target = find()
+    if (!target && filter) {
+      select(sel, '')
+      target = find()
+    }
+    if (!target) return
+    stick = false
+    target.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    target.classList.remove('flash')
+    void target.offsetWidth
+    target.classList.add('flash')
+  }
+
+  $('feed').addEventListener('scroll', () => {
+    const f = $('feed')
+    stick = f.scrollHeight - f.scrollTop - f.clientHeight < 60
+  })
+  new ResizeObserver(() => { if (stick) $('feed').scrollTop = $('feed').scrollHeight }).observe($('feed'))
+
+  poll()
+})()
+</script>
+</body>
+</html>

@@ -107,11 +107,13 @@ On any machine already admitted:
 
 **You:** `/denden:im invite`
 
-> 🐌» (( Invitation opened in your browser · click to copy the code · single use, valid 20 min ))
+> 🐌» (( Invitation opened in your browser · click to copy the code · single use, valid 30 min ))
 
 Once the code is copied:
 
 > 🐌» (( Invitation for vibedoc-chan copied · single use, valid until 18:42 ))
+
+For a machine that will join later, ask for a longer code, up to 24 hours: `/denden:im invite for 4h` (valid until 22:12, or "tomorrow 09:10").
 
 On the new machine, the command is the same as for a machine already in the channel:
 
@@ -146,7 +148,7 @@ On the new machine, the command is the same as for a machine already in the chan
 
   > 🐌» ((
   > srv-api has no browser for the invitation page
-  > In your own terminal on srv-api, outside the AI, run: denden invite vibedoc-chan --print · the code shows there, never in this conversation · single use, valid 20 min
+  > In your own terminal on srv-api, outside the AI, run: denden invite vibedoc-chan --print · the code shows there, never in this conversation · single use, valid 30 min
   > ))
 
   `--print` shows the code on a line of its own, easy to select, with its expiry time and the command for the new machine, and also sends it to the clipboard of the user's computer when the terminal allows it (OSC 52: Windows Terminal, iTerm2, kitty, WezTerm, tmux with `set-clipboard on`). On a server, `denden link` makes the short `denden` command (a link in `~/.local/bin`) once, instead of the plugin's long path.
@@ -298,7 +300,7 @@ All of them are used in the conversation, as `/denden:im <command>` (Claude Code
 | *(none)* | state of this conversation: name, channel, mode, online, unread |
 | `create <channel> [as <name>]` | creates the channel on this machine and attaches the conversation to it |
 | `join <channel> [as <name>]` | attaches the conversation to the channel (see below) |
-| `invite` | local page with a code, to let a new machine in |
+| `invite [for <time>]` | local page with a code, to let a new machine in (valid 30 min, or the time asked, 24 h at most) |
 | `open` | reopens the current local page, if its tab was closed |
 | `who` | the denden of the channel: machine, role, state |
 | `send <to> <text>` | sends without expecting a reply |
@@ -315,6 +317,7 @@ All of them are used in the conversation, as `/denden:im <command>` (Claude Code
 | `leave <channel>` | this machine leaves the channel |
 | `check` | full report on the install and the protections, only on request |
 | `link` | in the user's own terminal (Linux, macOS): a short `denden` command, instead of the plugin's path |
+| `ui` | the dashboard of this machine, in the browser (see 10) |
 
 What `join` does:
 - **the machine is not a member yet**: it asks for the invitation code, on a local page or in a separate terminal;
@@ -342,7 +345,7 @@ There is no `trust`: a machine only comes in by invitation, and a reinstalled ma
 
 - **Any admitted member can invite.** A machine not admitted yet cannot. In agent-im it could, and its guest stayed blocked at every other member.
 - The inviting machine admits the new machine, then hands it a certificate signed with its key. The other members accept it because the certificate goes back to a machine they know.
-- **A code works once and is valid for 20 minutes.** The local page shows it for 15 minutes with a countdown, then empties itself and tries to close. Both machines must therefore be available at the same time. The inviting machine's daemon stays up while an invitation is unused.
+- **A code works once and is valid for 30 minutes**, or for the time asked (`invite for 2h`), 24 hours at most. The local page shows it for 15 minutes with a countdown, then empties itself and tries to close. The inviting machine must be online when the new one joins: its daemon stays up while an invitation is unused. An invitation cannot be cancelled, which is why its length is capped.
 - **No administrator for now.** So there is neither `remove` nor a change of secret. To keep a machine out, each member blocks it on their side (`block`). To really exclude it, you create a new channel.
 - **Later**, an administrator role guaranteed by signatures, held by several machines, can be added without redoing everything: certificates would just have to go back to an administrator.
 
@@ -408,7 +411,7 @@ A local shortcut for a frequent subgroup (`servers = api, stress, db`) may come 
 ## 8. Daemon
 
 - **One daemon per machine**, which runs all its channels and all its denden.
-- **It runs as long as at least one conversation of the machine is attached**, or an invitation from this machine is waiting to be used. With neither, it stops by itself after 10 minutes with nothing to do. Names stay bound: they are entries in each member's records, not processes.
+- **It runs as long as at least one conversation of the machine is attached**, or an invitation from this machine is waiting to be used, or a dashboard is open. With none of them, it stops by itself after 10 minutes with nothing to do. Names stay bound: they are entries in each member's records, not processes.
 - **A machine without a daemon receives nothing**: messages sent to it wait at the sender, and leave when both machines are online at the same time.
 - **`keepalive on`** keeps the daemon running all the time, for a server that must receive at any moment. Messages then wait on the server for the next conversation that takes the denden.
 
@@ -442,11 +445,26 @@ The absence of Claude's `deny` rule (`Read(~/.denden/**)`), which a plugin canno
 - **A leaked invitation code reveals the secret forever**, even once used or expired. It does not get anyone admitted, but it lets them spot the IP addresses of the members online. Without an administrator, the secret never changes.
 - **We control who comes in, not what an admitted member does with what they read**: they can always copy messages elsewhere.
 - **A serverless P2P network** delivers a message only when the sender and the receiver are online at the same time, unless the receiver has `keepalive on`.
-- **Strict NATs**: two machines both behind a NAT that gives a different port for each destination cannot reach each other without a relay, which denden does not have yet (see [architecture.md](architecture.md#7-known-limits)).
+- **Strict NATs**: two machines both behind a NAT that gives a different port for each destination cannot reach each other without a relay, which denden does not have yet (see [architecture.md](architecture.md#8-known-limits)).
 
-## 10. Repository and names
+## 10. The dashboard (`ui`)
 
-### 10.1 Layout
+`/denden:im ui` opens a page that shows, in one place, everything this machine knows: its channels, their machines and denden, its conversations, and the messages of its denden. The first version only shows; it changes nothing.
+
+- **Opening.** From a conversation, denden opens the system browser itself, and the AI never sees the page's address: the page shows the messages of every conversation of the machine. In the user's own terminal, `denden ui` opens the browser too and prints the address. On a server without a desktop, `denden ui` in the user's SSH terminal prints the address and the SSH tunnel to type on their computer; from a conversation, denden points to the terminal, without the address.
+- **The address** is local (`127.0.0.1`) and new at each opening, with a random token. It lives with its tab: the page checks in every few seconds, and the address stops working 2 minutes after the tab closes, and after 12 hours in any case. A new address waits 10 minutes for its first visit (time to open an SSH tunnel). To come back, run `ui` again. The page has the protections of the local pages (CSP, `x-denden` header, same origin, a loopback host).
+- **The layout**, in English only, updated live, in three columns (two, then one, on narrower screens). Markers name what each thing is: 📡 channel, 💻 machine, 🐌 denden, 💬 conversation, ✨ AI.
+  - **On the left, the channels**, each with a dot (green: another machine online; grey: nobody else; amber: waiting to be admitted) and the number of messages its conversations have not seen yet. Under each channel, unfolded by default, this machine's denden: 🐌 the name, then 💬 the conversation holding it (its title or folder) and ✨ its AI, then its state. A denden that no conversation holds shows "no conversation" and what waits for it; a channel with no denden here shows the `join` command. Clicking a channel shows all its messages; clicking a denden, only its own.
+  - **In the middle, the messages** of the chosen channel, the newest at the bottom, full text. Each header reads 🐌 sender → 🐌 recipients (or 📣 everyone). A question carries ❓ and whether it is ✅ answered or ⏳ waiting for an answer; an answer shows ↩️ the start of its question, a click away. A message no conversation of this machine has seen yet says so (⏳ not seen yet by 🐌 docs); one that waited at its sender says ⚠️ delivered late. Channel events (a machine joined, an alert) are small centered lines. Messages in a row from the same sender come under one header; a long one folds after about fifteen lines. Text stays plain: no links, no formatting.
+  - **On the right, who is here**, by machine: this machine first, then the ones online, then the ones offline (with when they were last seen), and the blocked ones apart. Under each machine its denden, with their state, ✨ AI and role. The fingerprint is in the machine's tooltip.
+  - **One vocabulary for states.** This machine's denden: listening, gets messages at its next turn, paused, no conversation; `auto` reads "acts on its own"; how it listens (silent mode, Monitor, Codex notices) is in a tooltip. Another machine's denden: online or no conversation, since this machine cannot know whether its conversation listens; nothing when its machine is offline.
+- **Only what this machine knows**: the messages its own denden sent and received. The exchanges between denden of other machines never go through it.
+- **Looking marks nothing as read**: unread messages belong to conversations. An open tab counts as presence, and keeps the daemon up.
+- **Later**, with a confirmation each: pause and resume, `auto`, the wake-up budget, detach a conversation, block or unblock a machine, invite, and, to clean up, delete a denden or a channel from this machine.
+
+## 11. Repository and names
+
+### 11.1 Layout
 
 ```text
 denden/
@@ -477,7 +495,7 @@ denden/
 - **peeroxide** lives separately, in `D:\Projects\peeroxide`. denden depends on it through the `alaa-eddine/peeroxide` fork, pinned to a commit. To change it, point temporarily at the local folder.
 - The prototype is not carried over: only its reports (interoperability, end-to-end tests, Codex heartbeat) join `docs/notes/`.
 
-### 10.2 Names
+### 11.2 Names
 
 | Item | Name |
 |---|---|
@@ -509,7 +527,7 @@ The internal constants of the cryptographic derivation do not change: the user n
 
 No migration from `~/.agent-im`: everything starts from scratch.
 
-## 11. Technical lessons carried over from agent-im
+## 12. Technical lessons carried over from agent-im
 
 Validated during the agent-im trials, and kept as they were:
 - **Network**: Hyperswarm/HyperDHT in Rust with peeroxide 1.7.3 (fork, now pinned at commit `43d3de4`, which fixes the hole punch behind a strict NAT), HMAC topics rotated daily, proof before any exchange, Ed25519 keys, certificate chains.
@@ -521,7 +539,7 @@ Validated during the agent-im trials, and kept as they were:
 - **Windows**: the daemon runs from a copy of the binary checked by its hash, because a running executable is locked.
 - **Local pages**: a minimal page, a button that names the next step, a countdown, then the page empties itself and tries to close. They open preferably in the AI's built-in browser (`preview_start` for Claude), otherwise in the system browser, otherwise their address is shown (`--no-browser`, `open`). The CSP is strict, and the APIs require the `x-denden` header, a JSON body and the same origin. Copying to the clipboard goes through `writeText`, then `execCommand`, then a manual copy.
 
-## 12. Points settled during implementation
+## 13. Points settled during implementation
 
 The open points of the discussion, and what was chosen (details in [architecture.md](architecture.md)):
 1. **Language of the fixed texts**: English. The AI relays these lines in the user's language, keeping the `> 🐌» (( … ))` shape. The local pages follow the browser's language (English or French).
@@ -568,12 +586,16 @@ When a decision is up to the user, the CLI does not wait for input: it prints th
 | 29 | Command list approved, without `trust` |
 | 30 | Machine name = host name, with the fingerprint for duplicates |
 | 31 | A conversation is named by its title, otherwise by application, folder and last activity |
-| 32 | Code valid 20 min; page shown 15 min with a countdown |
+| 32 | Code valid 20 min; page shown 15 min with a countdown (30 min by default since 43) |
 | 33 | A channel with the same name already present: ask for a local name (built as: the local name is the one typed in `join`, see 4.3) |
 | 34 | History kept 30 days; a waiting message dropped after 7 days |
-| 35 | No dashboard in the first version |
+| 35 | No dashboard in the first version (it came later: 41) |
 | 36 | A message handed over more than an hour after it was sent: never handled without the user's go-ahead |
 | 37 | Claude listens in silent mode (a background command that ends on a message) by default; the Monitor is the fallback |
 | 38 | `pause` / `resume`: no listener and no wake-up while paused, messages wait for the user's next message here |
 | 39 | Several lines at once come under one snail: `> 🐌» ((`, the lines, `> ))` |
 | 40 | Servers without a browser: the pasted code shows its ends, `invite` points to `denden invite --print` in the user's terminal (code also sent to the clipboard), `join` shows its progress, `denden link` makes the short command |
+| 41 | The dashboard (`ui`), read only at first: local page, new address per opening that lives with its tab (12 h at most), full message text, never shown to the AI, English only |
+| 42 | Later in the dashboard: actions with confirmation, among them deleting a denden or a channel from this machine |
+| 43 | An invitation lasts 30 min by default, or the time asked (`invite for 2h`), 24 h at most; the invite and join pages stay as they are |
+| 44 | The dashboard follows the real hierarchy: channels with this machine's denden on the left, messages in the middle, who is here by machine on the right; denden names first everywhere, emoji markers, one vocabulary for states |

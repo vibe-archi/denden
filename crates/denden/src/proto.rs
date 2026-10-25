@@ -10,8 +10,10 @@ use serde_json::{Value, json};
 use crate::core::*;
 
 pub const PROTO_VERSION: u64 = 3;
-/// An invitation code is valid this long; the local page shows it for INVITE_PAGE.
-pub const INVITE_TTL: u64 = 20 * 60 * 1000;
+/// An invitation code is valid this long, or up to INVITE_MAX when asked; the local page shows it
+/// for INVITE_PAGE.
+pub const INVITE_TTL: u64 = 30 * 60 * 1000;
+pub const INVITE_MAX: u64 = 24 * 3600 * 1000;
 pub const INVITE_PAGE: u64 = 15 * 60 * 1000;
 const MAX_CHAIN: usize = 8;
 const MAX_INVITE_LIST: usize = 200;

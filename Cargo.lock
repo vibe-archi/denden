@@ -159,7 +159,7 @@ dependencies = [
 
 [[package]]
 name = "denden"
-version = "0.4.0"
+version = "0.6.0"
 dependencies = [
  "base64",
  "ed25519-dalek",

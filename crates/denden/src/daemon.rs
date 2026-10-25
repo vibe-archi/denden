@@ -28,6 +28,13 @@ use crate::wake::{self, Decision, Unread, WakeState};
 /// Without a listener, an MCP server or any command for this long (and no keepalive), the daemon
 /// stops: nobody on this machine would read what arrives.
 const IDLE_STOP: u64 = 10 * 60 * 1000;
+/// A dashboard address dies when its page has not polled for UI_IDLE (UI_FIRST before its first
+/// visit: time to open an SSH tunnel), and UI_MAX after it was made.
+const UI_IDLE: u64 = 2 * 60 * 1000;
+const UI_FIRST: u64 = 10 * 60 * 1000;
+const UI_MAX: u64 = 12 * 3600 * 1000;
+/// The dashboard page (plugin/skills/im/pages/dashboard.html), with NONCE and CONFIG to fill.
+const DASHBOARD: &str = include_str!("../../../plugin/skills/im/pages/dashboard.html");
 
 pub fn log_line(s: &str) {
     use std::io::Write;
@@ -88,6 +95,22 @@ pub struct Watcher {
     pub id: u64,
     pub conv: String,
     pub tx: mpsc::UnboundedSender<String>,
+    /// A silent-mode listener (`watch --once`), not a Monitor.
+    pub once: bool,
+}
+
+/// An open dashboard: its address token was made at `made`, and its page last polled at `seen`.
+pub struct UiPage {
+    pub made: u64,
+    pub seen: u64,
+    pub visited: bool,
+}
+
+impl UiPage {
+    fn alive(&self, now: u64) -> bool {
+        let idle = if self.visited { UI_IDLE } else { UI_FIRST };
+        now.saturating_sub(self.seen) < idle && now.saturating_sub(self.made) < UI_MAX
+    }
 }
 
 pub enum AckResult {
@@ -110,6 +133,8 @@ pub struct State {
     /// MCP servers connected (Codex is open on this machine).
     pub presence: usize,
     pub last_active: u64,
+    /// Dashboard addresses (`ui`), by token.
+    pub ui_pages: HashMap<String, UiPage>,
 }
 
 pub type Shared = Arc<Mutex<State>>;
@@ -183,6 +208,11 @@ impl State {
     /// A notice from denden to the conversation of our denden `d` (it goes through like a message).
     /// `quiet` ones never wake: they wait for the next hand-over.
     pub fn note(&mut self, cid: &str, d: &str, text: &str, alert: bool, quiet: bool) {
+        self.record_note(cid, d, text, alert, quiet, None);
+    }
+    /// `mark`: "event" for the channel's own record of a notice to all (no denden: the dashboard
+    /// shows it), "shared" for each denden's copy of it.
+    fn record_note(&mut self, cid: &str, d: &str, text: &str, alert: bool, quiet: bool, mark: Option<&str>) {
         let Some(c) = self.chans.get_mut(cid) else { return };
         let mut m = Map::new();
         m.insert("id".into(), json!(random_hex(6)));
@@ -196,13 +226,17 @@ impl State {
         if quiet {
             m.insert("quiet".into(), json!(true));
         }
+        if let Some(k) = mark {
+            m.insert(k.into(), json!(true));
+        }
         c.ch.record(m);
     }
     /// The same notice to every attached denden of a channel.
     pub fn note_all(&mut self, cid: &str, text: &str, alert: bool, quiet: bool) {
+        self.record_note(cid, "", text, alert, true, Some("event"));
         let dendens: Vec<String> = self.convs.attached().filter(|c| c.cid == cid).map(|c| c.denden.clone()).collect();
         for d in dendens {
-            self.note(cid, &d, text, alert, quiet);
+            self.record_note(cid, &d, text, alert, quiet, Some("shared"));
         }
     }
 
@@ -823,6 +857,11 @@ fn delete(st: &mut State, b: &Value) -> Value {
 }
 
 fn invite(st: &mut State, b: &Value) -> Value {
+    let ttl = match b.get("ttl").and_then(Value::as_u64) {
+        None => INVITE_TTL,
+        Some(t) if (60_000..=INVITE_MAX).contains(&t) => t,
+        Some(_) => return api_err("an invitation lasts from 1 min to 24 h"),
+    };
     let cid = match st.held(s(b, "conv")).map(|(c, _)| c).or_else(|| st.cid_by_label(s(b, "label"))) {
         Some(c) => c,
         None => return api_err("which channel? run this from a conversation attached to it, or name it"),
@@ -833,7 +872,7 @@ fn invite(st: &mut State, b: &Value) -> Value {
     }
     let now = now_ms();
     let token = random_hex(16);
-    let expires = now + INVITE_TTL;
+    let expires = now + ttl;
     let mut invites: Vec<Value> = c.ch.cfg.get("invites").and_then(Value::as_array).cloned().unwrap_or_default().into_iter().filter(|i| u(i, "exp") > now).collect();
     invites.push(json!({ "token": token, "exp": expires }));
     c.ch.cfg.insert("invites".into(), Value::Array(invites));
@@ -858,8 +897,12 @@ fn who(st: &State, b: &Value) -> Value {
         Some(c) => c,
         None => return api_err("which channel? run this from a conversation attached to it, or name it"),
     };
-    let me_d = st.held(s(b, "conv")).map(|(_, d)| d);
-    let c = &st.chans[&cid];
+    who_in(st, &cid, st.held(s(b, "conv")).map(|(_, d)| d))
+}
+
+/// The denden of a channel, as `who` shows them; `me_d`: the asking conversation's denden.
+fn who_in(st: &State, cid: &str, me_d: Option<String>) -> Value {
+    let c = &st.chans[cid];
     let now = now_ms();
     let rows: Vec<Value> = c
         .ch
@@ -880,7 +923,7 @@ fn who(st: &State, b: &Value) -> Value {
                 "idle".into()
             } else if mine {
                 let unread = c.ch.log.unread(&n.n).len();
-                match st.convs.holder(&cid, &n.n) {
+                match st.convs.holder(cid, &n.n) {
                     Some(h) if h.paused && unread > 0 => format!("paused, {unread} unread"),
                     Some(h) if h.paused => "paused".into(),
                     Some(h) if h.app() == "claude" && !st.listening(&h.key) && unread > 0 => format!("idle, {unread} unread"),
@@ -1102,6 +1145,175 @@ fn hook(st: &mut State, b: &Value) -> Value {
     json!({ "accepted": true, "items": items, "auto": auto, "denden": d, "label": st.chans[&cid].ch.label(), "conv": conv })
 }
 
+// ---------- the dashboard ----------
+
+/// `/ui/<token>` (the page) and `/ui/<token>/api/state` (what it shows). No API token here: a valid
+/// page token instead, a loopback Host (against DNS rebinding), and the x-denden header on the API
+/// (another site cannot send it without a preflight, never answered).
+fn ui_route(shared: &Shared, req: &http::Request) -> Vec<u8> {
+    if !loopback_host(req.header("host").unwrap_or("")) {
+        return http::response(403, &[("content-type", "text/plain")], b"forbidden");
+    }
+    let rest = &req.path["/ui/".len()..];
+    let (tok, sub) = rest.split_once('/').unwrap_or((rest, ""));
+    let mut st = shared.lock().unwrap();
+    let now = now_ms();
+    st.ui_pages.retain(|_, p| p.alive(now));
+    let Some(page) = st.ui_pages.get_mut(tok) else {
+        return if sub.is_empty() {
+            http::response(410, &[("content-type", "text/html; charset=utf-8"), ("cache-control", "no-store")], GONE_PAGE.as_bytes())
+        } else {
+            json_reply(410, &json!({ "error": "this dashboard address has expired: run denden ui again" }))
+        };
+    };
+    page.seen = now;
+    page.visited = true;
+    match (req.method.as_str(), sub) {
+        ("GET", "") => {
+            let nonce = random_hex(16);
+            let config = json!({ "api": format!("/ui/{tok}/api/state"), "poll": 2000 }).to_string().replace('<', "\\u003c");
+            let html = DASHBOARD.replacen("{{NONCE}}", &nonce, 1).replacen("{{CONFIG}}", &config, 1);
+            let csp = format!("default-src 'none'; style-src 'unsafe-inline'; img-src data:; script-src 'nonce-{nonce}'; connect-src 'self'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'");
+            http::response(
+                200,
+                &[("content-type", "text/html; charset=utf-8"), ("content-security-policy", &csp), ("cache-control", "no-store"), ("referrer-policy", "no-referrer"), ("x-content-type-options", "nosniff")],
+                html.as_bytes(),
+            )
+        }
+        ("GET", "api/state") if req.header("x-denden") == Some("1") => {
+            let after: HashMap<String, u64> = req
+                .q("after")
+                .unwrap_or("")
+                .split(',')
+                .filter_map(|p| p.split_once(':'))
+                .filter_map(|(c, n)| n.parse().ok().map(|n| (c.to_string(), n)))
+                .collect();
+            json_reply(200, &ui_state(&st, &after))
+        }
+        _ => json_reply(404, &json!({ "error": "not found" })),
+    }
+}
+
+const GONE_PAGE: &str = "<!doctype html><meta charset=utf-8><title>denden</title><body style=\"font:15px system-ui;background:#0b0d14;color:#eef0f7;display:grid;place-items:center;height:100vh;margin:0\"><p>This dashboard address has expired. Run <code>denden ui</code> again.</p>";
+
+/// A Host header naming this machine itself, with or without a port.
+fn loopback_host(host: &str) -> bool {
+    let name = match host.strip_prefix('[') {
+        Some(v6) => v6.split(']').next().unwrap_or(""),
+        None => host.split(':').next().unwrap_or(""),
+    };
+    matches!(name, "127.0.0.1" | "localhost" | "::1")
+}
+
+/// Who wrote a message: a sent one keeps its writer in `d`.
+fn sender(m: &Value) -> &str {
+    if s(m, "dir") == "out" { s(m, "d") } else { s(m, "from") }
+}
+
+/// Everything the dashboard shows, channel by channel: its machines, its denden (this machine's
+/// with the conversation holding each), and its messages. `after`: per channel, the last record
+/// sequence the page has; only newer messages come (the last 500 on a first load).
+fn ui_state(st: &State, after: &HashMap<String, u64>) -> Value {
+    let now = now_ms();
+    // Just started: the other machines are still being reached.
+    let starting = now.saturating_sub(st.started_at) < 30_000;
+    let fp = |k: &str| fmt_fp(&fingerprint_hex(k)[..8]);
+    let channels: Vec<Value> = st
+        .chans
+        .iter()
+        .map(|(cid, c)| {
+            let ch = &c.ch;
+            let mut machines = vec![json!({ "id": fp(&ch.me), "name": ch.machine(), "me": true, "online": true })];
+            for (k, m) in ch.members.machines.iter().filter(|(k, _)| **k != ch.me) {
+                let (blocked, online) = (ch.members.blocked.contains_key(k), c.peers.contains_key(k));
+                machines.push(json!({
+                    "id": fp(k), "name": ch.members.display(k), "online": online && !blocked,
+                    "connecting": starting && !online, "blocked": blocked, "seen": m.seen,
+                }));
+            }
+            for (k, name) in ch.members.blocked.iter().filter(|(k, _)| !ch.members.machines.contains_key(*k)) {
+                machines.push(json!({ "id": fp(k), "name": name, "blocked": true }));
+            }
+            let denden: Vec<Value> = ch
+                .names
+                .map
+                .values()
+                .filter(|n| n.active() && !ch.members.blocked.contains_key(&n.k))
+                .map(|n| {
+                    let mut v = json!({ "name": n.n, "machine": fp(&n.k), "app": n.app, "role": n.role, "active": n.on });
+                    if n.k == ch.me {
+                        v["mine"] = json!(true);
+                        v["waiting"] = json!(ch.log.unread(&n.n).iter().filter(|m| s(m, "dir") == "in").count());
+                        if let Some(cv) = st.convs.holder(cid, &n.n) {
+                            // Codex is woken by notices; a Claude conversation hears only while a listener runs.
+                            let state = if cv.paused {
+                                "paused"
+                            } else if cv.app() == "codex" || st.listening(&cv.key) {
+                                "listening"
+                            } else {
+                                "next turn"
+                            };
+                            // How it hears, for the page's tooltip.
+                            let how = match cv.app() {
+                                "codex" => "woken by notices",
+                                _ if st.watchers.iter().any(|w| w.conv == cv.key && !w.once) => "Monitor",
+                                _ => "silent mode",
+                            };
+                            v["conv"] = json!({
+                                "app": cv.app(), "title": cv.title, "cwd": cv.cwd, "seen": cv.seen.max(cv.at), "auto": cv.auto,
+                                "wakes": cv.wakes, "state": state, "how": how,
+                            });
+                        }
+                    }
+                    v
+                })
+                .collect();
+            // Messages not handed yet to a denden of this machine, by message.
+            let mut unseen: Map<String, Value> = Map::new();
+            for d in ch.my_names() {
+                for m in ch.log.unread(&d).into_iter().filter(|m| s(m, "dir") == "in") {
+                    if let Value::Array(a) = unseen.entry(format!("{}/{}", sender(m), s(m, "id"))).or_insert_with(|| json!([])) {
+                        a.push(json!(d));
+                    }
+                }
+            }
+            // A message between denden of this machine is stored once per side: shown once. The page
+            // also drops a twin that comes in a later poll.
+            let from = after.get(cid).copied();
+            let mut twins = HashSet::new();
+            let mut list: Vec<Value> = ch
+                .log
+                .messages
+                .iter()
+                .filter(|m| from.is_none_or(|f| u(m, "seq") > f))
+                .filter_map(|m| match s(m, "dir") {
+                    "in" | "out" => twins.insert(format!("{}/{}", sender(m), s(m, "id"))).then(|| {
+                        let mut v = item(c, m, now);
+                        v["from"] = json!(sender(m));
+                        v["waited"] = json!(u(m, "waited"));
+                        v["late"] = json!(u(m, "waited") >= late_after());
+                        v
+                    }),
+                    // Channel events (a machine joined, an alert to all), and an alert to one denden.
+                    "note" if truthy(m.get("event")) || (truthy(m.get("alert")) && !truthy(m.get("shared"))) => Some(json!({
+                        "seq": m.get("seq"), "id": m.get("id"), "kind": "event", "text": m.get("text"), "at": m.get("at"),
+                        "alert": truthy(m.get("alert")), "d": s(m, "d"),
+                    })),
+                    _ => None,
+                })
+                .collect();
+            if from.is_none() && list.len() > 500 {
+                list.drain(..list.len() - 500);
+            }
+            json!({
+                "cid": cid, "label": ch.label(), "member": ch.is_member(), "online": c.peers.len(), "seq": ch.log.seq,
+                "machines": machines, "denden": denden, "unseen": unseen, "messages": list,
+            })
+        })
+        .collect();
+    json!({ "machine": machine_name(), "channels": channels, "now": now })
+}
+
 // ---------- local API ----------
 
 fn json_reply(code: u16, v: &Value) -> Vec<u8> {
@@ -1153,6 +1365,11 @@ async fn stream_out(wr: &mut tokio::net::tcp::OwnedWriteHalf, rd: &mut tokio::ne
 async fn handle_api(shared: Shared, stream: tokio::net::TcpStream, token: String) {
     let (mut rd, mut wr) = stream.into_split();
     let Some(req) = http::server::read_request(&mut rd, MAX_TEXT * 8).await else { return };
+    if req.path.starts_with("/ui/") {
+        let out = ui_route(&shared, &req);
+        let _ = wr.write_all(&out).await;
+        return;
+    }
     if !safe_eq(req.header("x-denden-token").unwrap_or(""), &token) {
         let _ = wr.write_all(&json_reply(403, &json!({ "error": "forbidden" }))).await;
         return;
@@ -1212,7 +1429,7 @@ async fn handle_api(shared: Shared, stream: tokio::net::TcpStream, token: String
                     st.last_active = now_ms();
                     // A new listener starts from what is unread: everything announced again.
                     st.wakes.entry(conv.clone()).or_default().notified = 0;
-                    st.watchers.push(Watcher { id: wid, conv: conv.clone(), tx });
+                    st.watchers.push(Watcher { id: wid, conv: conv.clone(), tx, once: req.q("once").is_some() });
                     notify(&mut st);
                     Some(wid)
                 }
@@ -1234,6 +1451,16 @@ async fn handle_api(shared: Shared, stream: tokio::net::TcpStream, token: String
         }
         "GET /history" => reply(history(&shared.lock().unwrap(), &req)),
         "POST /set" => reply(set(&mut shared.lock().unwrap(), &b)),
+        "POST /ui" => {
+            // A new dashboard address; the page polls to keep it alive.
+            let mut st = shared.lock().unwrap();
+            let now = now_ms();
+            st.ui_pages.retain(|_, p| p.alive(now));
+            let tok = random_hex(16);
+            st.ui_pages.insert(tok.clone(), UiPage { made: now, seen: now, visited: false });
+            log!("dashboard opened");
+            reply(json!({ "path": format!("/ui/{tok}") }))
+        }
         "POST /keepalive" => {
             let mut st = shared.lock().unwrap();
             st.keepalive = truthy(b.get("on"));
@@ -1310,7 +1537,9 @@ fn idle_check(shared: &Shared) -> bool {
     // yet: the new machine is admitted by this one, which must be online when it comes.
     let attached = st.convs.attached().any(|c| st.chans.contains_key(&c.cid));
     let inviting = st.chans.values().any(|c| c.ch.cfg.get("invites").and_then(Value::as_array).is_some_and(|a| a.iter().any(|i| u(i, "exp") > now)));
-    !st.keepalive && !attached && !inviting && st.watchers.is_empty() && st.presence == 0 && now.saturating_sub(st.last_active) > IDLE_STOP
+    // An open dashboard counts as presence.
+    let watched = st.ui_pages.values().any(|p| p.alive(now));
+    !st.keepalive && !attached && !inviting && !watched && st.watchers.is_empty() && st.presence == 0 && now.saturating_sub(st.last_active) > IDLE_STOP
 }
 
 /// Hourly: history older than 30 days, and messages undelivered for 7 days.
@@ -1363,6 +1592,7 @@ pub fn run() -> Result<(), String> {
         pid,
         presence: 0,
         last_active: now,
+        ui_pages: HashMap::new(),
     };
     let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|e| e.to_string())?;
     rt.block_on(async move {
@@ -1473,5 +1703,33 @@ mod tests {
         assert!(recipients("api,all").is_err());
         assert!(recipients("Bad Name!").is_err());
         assert!(recipients("").is_err());
+    }
+
+    #[test]
+    fn the_dashboard_answers_loopback_hosts_only() {
+        for h in ["127.0.0.1:4242", "localhost:4242", "[::1]:4242", "127.0.0.1", "localhost"] {
+            assert!(loopback_host(h), "{h}");
+        }
+        for h in ["evil.example:4242", "127.0.0.1.evil.example", "localhost.evil.example:80", "[::2]:4242", ""] {
+            assert!(!loopback_host(h), "{h}");
+        }
+    }
+
+    #[test]
+    fn a_dashboard_address_lives_with_its_page() {
+        let p = UiPage { made: 0, seen: 0, visited: false };
+        assert!(p.alive(UI_IDLE + 1), "not visited yet: time to open a tunnel");
+        assert!(!p.alive(UI_FIRST));
+        let p = UiPage { made: 0, seen: 1000, visited: true };
+        assert!(p.alive(1000 + UI_IDLE - 1));
+        assert!(!p.alive(1000 + UI_IDLE));
+        let p = UiPage { made: 0, seen: UI_MAX, visited: true };
+        assert!(!p.alive(UI_MAX), "12 hours at most");
+    }
+
+    #[test]
+    fn a_sent_message_is_written_by_its_denden() {
+        assert_eq!(sender(&json!({ "dir": "out", "d": "alice", "id": "x" })), "alice");
+        assert_eq!(sender(&json!({ "dir": "in", "d": "bob", "from": "alice", "id": "x" })), "alice");
     }
 }
