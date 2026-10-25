@@ -4,7 +4,7 @@ This document turns [design.md](design.md) into technical choices. It describes 
 
 ## 1. Choices made for the open points
 
-Points of section 12 of design.md, settled here to move forward. They can still be revised:
+Points of section 13 of design.md, settled here to move forward. They can still be revised:
 - **Language of the fixed texts: English.** It is the language of the first approved examples (`Received message from bob@project-xx`) and that of a distributed plugin. The AI relays these lines in the user's language, keeping the `> 🐌» (( … ))` shape. The local pages are in English or French, after the browser's `Accept-Language`.
 - **Outputs on several lines**: a command gathers what it prints for the conversation and writes it at the end as one block, `> 🐌» ((`, one `> ` line each, `> ))` (`output::group`); a single line keeps `> 🐌» (( … ))`, a question comes after the block. Lines that cannot wait (a local page's address, printed before the page waits) go out at once. `who` puts its table in the block; `watch --once` writes its batch as one block. The skill asks the AI to group what it relays the same way.
 - **`DENDEN_AS` goes away.** A conversation is identified by its session: `--session ${CLAUDE_SESSION_ID}` for Claude, `CODEX_THREAD_ID` for Codex.
@@ -74,10 +74,18 @@ Inside each Noise-encrypted stream, JSON frames separated by newlines:
 - **Pause**: a paused conversation gets no listener (a running `watch` gets a last notice and ends; a new one ends at once), no queued Codex notice and no Stop-hook handover. Its messages wait for the user's next prompt (the prompt hook) or for `resume`. Attaching a conversation again resumes it.
 - **Lateness**: on handover, `now - (received - waited) >= 1 h` marks the message as late (`DENDEN_LATE_AFTER_SECONDS` changes the hour, for tests). A late message comes with the question "Which ones should I handle?", whatever the mode.
 - **History**: messages older than 30 days are purged at startup, then every hour.
-- **Lifetime**: the daemon stays up while a conversation of the machine is attached, or while one of its invitations is unused. Otherwise it stops after 10 minutes with no Claude listener open, no Codex MCP server connected and no activity, unless `keepalive on` is set.
+- **Lifetime**: the daemon stays up while a conversation of the machine is attached, or while one of its invitations is unused. Otherwise it stops after 10 minutes with no Claude listener open, no Codex MCP server connected, no dashboard open and no activity, unless `keepalive on` is set.
 - **Wake-ups** (`wake.rs`): messages that arrive together are announced together (2 s). A budget per conversation, 20 per hour by default. For Claude, beyond it the listener stops printing, announces the limit once, and messages wait for the user's next prompt (the prompt hook hands them over). For Codex, one notice at a time is queued with `codex queue`, at least 30 s apart, not during a turn (a turn counts as finished after 15 min without a Stop hook); a notice blocks the next ones until it is read, a hook comes, or 10 min pass; after 3 failed `codex queue` runs, the conversation is no longer woken.
 
-## 5. The CLI
+## 5. The dashboard
+
+- **Served by the daemon**, on its local API port, under `/ui/<token>`: the page, and `/ui/<token>/api/state`. These routes need no API token (a browser has none); they need a valid page token instead, a loopback `Host` (against DNS rebinding), and, for the API, the `x-denden` header (a cross-site request cannot send it without a preflight that is never answered). The page has a nonce CSP.
+- **Page tokens** come from `POST /ui` (an API call, so from the CLI only). Each lives while it is polled: 2 minutes without a poll (10 minutes before the first one), or 12 hours after it was made, and it is gone. An open page counts as presence for the daemon's lifetime.
+- **`api/state`** returns, channel by channel: its machines (fingerprint as id, online, connecting, blocked, last seen); its denden (machine, application, role, held or not), and for this machine's ones what waits for them and the conversation holding them (application, title, folder, `auto`, budget, pause, how it listens: silent mode, Monitor or Codex notices); which messages each local denden has not been handed yet (`unseen`); and the messages. Messages are those of the machine's denden, once each (a message between two local denden is stored twice), with how long they waited at their sender; notices are left out, except the channel's events and alerts. A notice to the whole channel (`note_all`) is therefore also recorded once with no denden, marked `event`, and each denden's copy is marked `shared`. The page sends what it has (`after`, per channel) and gets only what is new; it works out itself which questions are answered. Reading marks nothing as read.
+- **The page** is `plugin/skills/im/pages/dashboard.html`, embedded in the binary like `ui.html`, in English, polling every 2 s.
+- **`ui` in the CLI** opens the system browser and never prints the address when it runs for an agent (a conversation, or no terminal); in the user's own terminal it prints it, and on a server without a desktop the SSH tunnel to reach it.
+
+## 6. The CLI
 
 - Every command goes through the daemon, which it starts if needed.
 - The conversation comes from `--session` (Claude), from `CODEX_THREAD_ID` (Codex, brought back to the user's conversation for a thread spawned by Codex), from `DENDEN_CONV` (tests), or does not exist (terminal).
@@ -86,7 +94,7 @@ Inside each Noise-encrypted stream, JSON frames separated by newlines:
 - **The Codex sandbox** blocks the network and `~/.denden`. When the daemon cannot be reached from inside it, the CLI says so and asks for the command to be run outside the sandbox.
 - **Internal commands**, not shown to the user: `inbox`, `watch` (and `watch --once`), `reply <id> <text>`, `hook-prompt`, `hook-stop`, `mcp` (the MCP server behind the Codex hooks), `stop`, and `__daemon` / `__launch` (starting the daemon).
 
-## 6. Phases
+## 7. Phases
 
 All the phases are done; phase 7 was run against a Linux server, with Claude Code and Codex, on two networks.
 
@@ -95,12 +103,12 @@ All the phases are done; phase 7 was run against a Linux server, with Claude Cod
 | 1 | Foundation | repository, workspace, renamed crate, plugin without Node | it compiles, unit tests green |
 | 2 | Model | v3 invitations, machine and name certificates, per-channel storage, conversation registry | unit tests of the rules (conflicts, signatures, lateness) |
 | 3 | Daemon | single daemon, protocol v3, routing, waiting, purge, presence, `keepalive` | two simulated machines (two `DENDEN_HOME`) exchange messages |
-| 4 | CLI | every command and its 🐌 outputs, 20 min invitations and 15 min page, hidden `denden join` in a terminal | the flow of design.md replayed by hand |
+| 4 | CLI | every command and its 🐌 outputs, time-limited invitations and 15 min page, hidden `denden join` in a terminal | the flow of design.md replayed by hand |
 | 5 | Wake-ups | Claude listener, Codex queue, hooks, budget, late messages, MCP presence | a wake-up in Claude and in Codex |
 | 6 | Plugin | SKILL.md rewritten, page, manifests, binary build script, README | install from the local marketplaces |
 | 7 | Validation | end-to-end tests, a test with the user in Claude and Codex | full flow validated |
 
-## 7. Known limits
+## 8. Known limits
 
 ### Strict NAT
 

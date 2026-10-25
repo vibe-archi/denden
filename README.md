@@ -78,9 +78,11 @@ Updates, offline packages and uninstalling: [docs/INSTALL.md](docs/INSTALL.md).
 
 **Confidential by design.** There is no denden server, so there is no server to trust or to breach. A message leaves the sender's machine inside an encrypted stream (Noise) and arrives on the receiver's machine, nowhere else. When the receiver is offline, the message waits on the sender's own machine, not in someone's cloud.
 
-**Invitation only.** A channel is protected by a random 256-bit secret, unrelated to its name. A machine that cannot prove it knows the secret is cut off before any exchange, and knowing it is not even enough: a machine gets in only with a single-use invitation code, valid 20 minutes, then a certificate signed by the member that invited it.
+**Invitation only.** A channel is protected by a random 256-bit secret, unrelated to its name. A machine that cannot prove it knows the secret is cut off before any exchange, and knowing it is not even enough: a machine gets in only with a single-use invitation code, valid 30 minutes (24 hours at most on request), then a certificate signed by the member that invited it.
 
 **Your AI never sees the keys.** Invitation codes are copied and pasted on a one-time local page (or typed hidden in a terminal), never in the conversation. The AI is told never to read denden's files, and a `deny` rule you add once makes sure of it.
+
+**Everything at a glance.** `/denden:im ui` opens a local dashboard in your browser: this machine's channels, their machines and denden, its conversations and how they listen, and the messages, live. Its address is never shown to the AI.
 
 **Agents that coordinate, under your control.** Each session gets an address in the channel (`alice`, `bob`…). Sessions send notes, ask questions and get replies; an idle session wakes up when a message arrives. By default, a request from another session is shown to you before anything is done, and messages that arrive late always wait for your go-ahead.
 
@@ -103,7 +105,7 @@ Updates, offline packages and uninstalling: [docs/INSTALL.md](docs/INSTALL.md).
 ## Known limits
 
 - **Both sides online.** With no server, a message is delivered when both machines are online at the same time; it waits on the sender's machine for up to 7 days. `keepalive on` keeps a server's daemon running so it can receive at any time.
-- **Strict NATs.** Some networks give a different port for each destination (corporate networks, 4G and 5G hotspots, some routers). A machine behind such a NAT can reach the others but cannot be reached, so it opens the connection itself: it usually works, in about half a minute to a minute and a half. Two machines both behind a strict NAT cannot connect: that would need a relay, which denden does not use (see [docs/architecture.md](docs/architecture.md#7-known-limits)).
+- **Strict NATs.** Some networks give a different port for each destination (corporate networks, 4G and 5G hotspots, some routers). A machine behind such a NAT can reach the others but cannot be reached, so it opens the connection itself: it usually works, in about half a minute to a minute and a half. Two machines both behind a strict NAT cannot connect: that would need a relay, which denden does not use (see [docs/architecture.md](docs/architecture.md#8-known-limits)).
 - **Platforms.** Windows x64 and Linux x64 for now: no macOS or Linux ARM binary yet.
 
 ## Development
@@ -118,7 +120,7 @@ The Rust sources are in `crates/denden` (one binary: CLI, daemon, MCP server), t
 sh scripts/build-plugin.sh
 ```
 
-Builds `denden.exe` (Windows x64) and `bin/linux-x64/denden` (static Linux x64, built in WSL) into `plugin/skills/im/`, with `SHA256SUMS`. Run it from Git Bash on Windows. The local page (`plugin/skills/im/pages/ui.html`) is embedded in the binary: rebuild after changing it.
+Builds `denden.exe` (Windows x64) and `bin/linux-x64/denden` (static Linux x64, built in WSL) into `plugin/skills/im/`, with `SHA256SUMS`. Run it from Git Bash on Windows. The local pages (`plugin/skills/im/pages/ui.html` and the dashboard, `dashboard.html`) are embedded in the binary: rebuild after changing them.
 
 To try your build, add the clone itself as a marketplace (`claude plugin marketplace add <clone>`, `codex plugin marketplace add <clone>`), then install `denden@denden` as above. Claude Code reads a local marketplace in place, so a change takes effect at the next session; Codex keeps a copy, so run `codex plugin add denden@denden` again after a change.
 
