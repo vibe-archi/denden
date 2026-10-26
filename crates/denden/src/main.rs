@@ -680,8 +680,9 @@ fn link_tip() -> String {
 }
 
 /// `denden ui`: the dashboard. Its address opens every message of this machine, so it never goes to
-/// an agent: from a conversation (or with no terminal) the browser opens and nothing is printed; in
-/// the user's own terminal it is printed, with the SSH tunnel on a server without a desktop.
+/// an agent: from a conversation (or with no terminal) the browser opens, and only the keyless /ui
+/// link is printed (it reopens the dashboard in that browser alone); in the user's own terminal the
+/// address is printed, with the SSH tunnel on a server without a desktop.
 fn cmd_ui(opts: &Opts) {
     let h = here(opts);
     let for_agent = h.conv.is_some() || !std::io::stdout().is_terminal();
@@ -698,10 +699,11 @@ fn cmd_ui(opts: &Opts) {
     let r = ok(call("POST", "/ui", Some(&json!({})), 10000));
     let Some(port) = daemon_info(&home()).map(|i| i.port) else { fail("the daemon is not running") };
     let url = format!("http://127.0.0.1:{port}{}", vs(&r, "path"));
+    let again = format!("http://127.0.0.1:{port}/ui");
     let no_browser = flag(opts, "no-browser");
     if for_agent {
         if !no_browser && ui::open_browser(&url, true) {
-            say(info("Dashboard opened in your browser · read only, live · it stays valid while the tab is open (12 h at most)"));
+            say(info(&format!("Dashboard opened in your browser · read only, live · to open it again in that browser: {again} (for 12 h)")));
         } else {
             say(info(&format!("No browser could be opened · in your own terminal, outside the AI, run: {} ui", own_command())));
         }
@@ -730,6 +732,7 @@ fn cmd_ui(opts: &Opts) {
     let first = if opened { "" } else { "Open it within 10 minutes: then it " };
     let stays = if opened { "It stays" } else { "stays" };
     println!("{first}{stays} valid while its tab is open, 12 hours at most. It shows every message of this machine: keep it out of AI conversations.");
+    println!("To open it again later, in the same browser: {again} (no key in it: it works only where the dashboard was opened, for 12 hours).");
 }
 
 /// Where `denden link` puts the short command.

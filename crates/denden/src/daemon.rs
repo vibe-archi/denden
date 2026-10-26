@@ -135,6 +135,9 @@ pub struct State {
     pub last_active: u64,
     /// Dashboard addresses (`ui`), by token.
     pub ui_pages: HashMap<String, UiPage>,
+    /// Browsers that opened a dashboard: cookie value -> when it was given. They may reopen it
+    /// through the keyless /ui link, for UI_MAX.
+    pub ui_cookies: HashMap<String, u64>,
 }
 
 pub type Shared = Arc<Mutex<State>>;
@@ -1147,38 +1150,67 @@ fn hook(st: &mut State, b: &Value) -> Value {
 
 // ---------- the dashboard ----------
 
-/// `/ui/<token>` (the page) and `/ui/<token>/api/state` (what it shows). No API token here: a valid
-/// page token instead, a loopback Host (against DNS rebinding), and the x-denden header on the API
-/// (another site cannot send it without a preflight, never answered).
+/// A new dashboard address token, alive while its page polls.
+fn new_ui_page(st: &mut State, now: u64) -> String {
+    st.ui_pages.retain(|_, p| p.alive(now));
+    let tok = random_hex(16);
+    st.ui_pages.insert(tok.clone(), UiPage { made: now, seen: now, visited: false });
+    log!("dashboard opened");
+    tok
+}
+
+/// `/ui/<token>` (the page), `/ui/<token>/api/state` (what it shows) and `/ui` (the keyless link
+/// to reopen it). No API token here: a valid page token instead, a loopback Host (against DNS
+/// rebinding), and the x-denden header on the API (another site cannot send it without a
+/// preflight, never answered). The page gives its browser a cookie (HttpOnly, SameSite=Strict):
+/// with it, `/ui` makes a new address, for UI_MAX. The link the conversation shows is `/ui`, so
+/// the AI never holds a key: without that browser's cookie the link opens nothing.
 fn ui_route(shared: &Shared, req: &http::Request) -> Vec<u8> {
-    if !loopback_host(req.header("host").unwrap_or("")) {
+    let host = req.header("host").unwrap_or("");
+    if !loopback_host(host) {
         return http::response(403, &[("content-type", "text/plain")], b"forbidden");
     }
-    let rest = &req.path["/ui/".len()..];
-    let (tok, sub) = rest.split_once('/').unwrap_or((rest, ""));
+    // Cookies are per host, not per port: one name per port, for several daemons over SSH tunnels.
+    let name = format!("denden_ui_{}", host.rsplit_once(':').map(|(_, p)| p).filter(|p| p.bytes().all(|b| b.is_ascii_digit())).unwrap_or("80"));
     let mut st = shared.lock().unwrap();
     let now = now_ms();
     st.ui_pages.retain(|_, p| p.alive(now));
-    let Some(page) = st.ui_pages.get_mut(tok) else {
-        return if sub.is_empty() {
-            http::response(410, &[("content-type", "text/html; charset=utf-8"), ("cache-control", "no-store")], GONE_PAGE.as_bytes())
-        } else {
-            json_reply(410, &json!({ "error": "this dashboard address has expired: run denden ui again" }))
+    st.ui_cookies.retain(|_, made| now.saturating_sub(*made) < UI_MAX);
+    let known = cookie(req, &name).is_some_and(|c| st.ui_cookies.contains_key(c));
+    let page = |code: u16, body: &str| http::response(code, &[("content-type", "text/html; charset=utf-8"), ("cache-control", "no-store")], body.as_bytes());
+    let to_new = |st: &mut State| {
+        let tok = new_ui_page(st, now);
+        http::response(303, &[("location", &format!("/ui/{tok}")), ("cache-control", "no-store")], b"")
+    };
+    if req.path == "/ui" {
+        return if known { to_new(&mut *st) } else { page(403, NO_COOKIE_PAGE) };
+    }
+    let rest = &req.path["/ui/".len()..];
+    let (tok, sub) = rest.split_once('/').unwrap_or((rest, ""));
+    let Some(p) = st.ui_pages.get_mut(tok) else {
+        return match sub {
+            // An old tab reloaded, from a browser that opened the dashboard: a new address.
+            "" if known => to_new(&mut *st),
+            "" => page(410, GONE_PAGE),
+            _ => json_reply(410, &json!({ "error": "this dashboard address has expired: run denden ui again" })),
         };
     };
-    page.seen = now;
-    page.visited = true;
+    p.seen = now;
+    p.visited = true;
     match (req.method.as_str(), sub) {
         ("GET", "") => {
             let nonce = random_hex(16);
             let config = json!({ "api": format!("/ui/{tok}/api/state"), "poll": 2000 }).to_string().replace('<', "\\u003c");
             let html = DASHBOARD.replacen("{{NONCE}}", &nonce, 1).replacen("{{CONFIG}}", &config, 1);
             let csp = format!("default-src 'none'; style-src 'unsafe-inline'; img-src data:; script-src 'nonce-{nonce}'; connect-src 'self'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'");
-            http::response(
-                200,
-                &[("content-type", "text/html; charset=utf-8"), ("content-security-policy", &csp), ("cache-control", "no-store"), ("referrer-policy", "no-referrer"), ("x-content-type-options", "nosniff")],
-                html.as_bytes(),
-            )
+            let mut headers = vec![("content-type", "text/html; charset=utf-8".to_string()), ("content-security-policy", csp), ("cache-control", "no-store".into()), ("referrer-policy", "no-referrer".into()), ("x-content-type-options", "nosniff".into())];
+            if !known {
+                let value = random_hex(16);
+                st.ui_cookies.insert(value.clone(), now);
+                headers.push(("set-cookie", format!("{name}={value}; Path=/ui; Max-Age={}; HttpOnly; SameSite=Strict", UI_MAX / 1000)));
+            }
+            let headers: Vec<(&str, &str)> = headers.iter().map(|(k, v)| (*k, v.as_str())).collect();
+            http::response(200, &headers, html.as_bytes())
         }
         ("GET", "api/state") if req.header("x-denden") == Some("1") => {
             let after: HashMap<String, u64> = req
@@ -1194,7 +1226,13 @@ fn ui_route(shared: &Shared, req: &http::Request) -> Vec<u8> {
     }
 }
 
-const GONE_PAGE: &str = "<!doctype html><meta charset=utf-8><title>denden</title><body style=\"font:15px system-ui;background:#0b0d14;color:#eef0f7;display:grid;place-items:center;height:100vh;margin:0\"><p>This dashboard address has expired. Run <code>denden ui</code> again.</p>";
+const GONE_PAGE: &str = "<!doctype html><meta charset=utf-8><title>denden</title><body style=\"font:15px system-ui;background:#0b0d14;color:#eef0f7;display:grid;place-items:center;height:100vh;margin:0\"><p>This dashboard address has expired. Run <code>/denden:im ui</code> in a conversation, or <code>denden ui</code> in a terminal.</p>";
+const NO_COOKIE_PAGE: &str = "<!doctype html><meta charset=utf-8><title>denden</title><body style=\"font:15px system-ui;background:#0b0d14;color:#eef0f7;display:grid;place-items:center;height:100vh;margin:0\"><p style=\"max-width:460px;text-align:center\">This link reopens the dashboard only in the browser where <code>denden ui</code> opened it, for 12 hours. Run <code>/denden:im ui</code> in a conversation, or <code>denden ui</code> in a terminal.</p>";
+
+/// The value of cookie `name` in a request.
+fn cookie<'a>(req: &'a http::Request, name: &str) -> Option<&'a str> {
+    req.header("cookie")?.split(';').filter_map(|p| p.trim().split_once('=')).find(|(k, _)| *k == name).map(|(_, v)| v)
+}
 
 /// A Host header naming this machine itself, with or without a port.
 fn loopback_host(host: &str) -> bool {
@@ -1365,7 +1403,7 @@ async fn stream_out(wr: &mut tokio::net::tcp::OwnedWriteHalf, rd: &mut tokio::ne
 async fn handle_api(shared: Shared, stream: tokio::net::TcpStream, token: String) {
     let (mut rd, mut wr) = stream.into_split();
     let Some(req) = http::server::read_request(&mut rd, MAX_TEXT * 8).await else { return };
-    if req.path.starts_with("/ui/") {
+    if req.path.starts_with("/ui/") || (req.path == "/ui" && req.method == "GET") {
         let out = ui_route(&shared, &req);
         let _ = wr.write_all(&out).await;
         return;
@@ -1453,12 +1491,7 @@ async fn handle_api(shared: Shared, stream: tokio::net::TcpStream, token: String
         "POST /set" => reply(set(&mut shared.lock().unwrap(), &b)),
         "POST /ui" => {
             // A new dashboard address; the page polls to keep it alive.
-            let mut st = shared.lock().unwrap();
-            let now = now_ms();
-            st.ui_pages.retain(|_, p| p.alive(now));
-            let tok = random_hex(16);
-            st.ui_pages.insert(tok.clone(), UiPage { made: now, seen: now, visited: false });
-            log!("dashboard opened");
+            let tok = new_ui_page(&mut shared.lock().unwrap(), now_ms());
             reply(json!({ "path": format!("/ui/{tok}") }))
         }
         "POST /keepalive" => {
@@ -1593,6 +1626,7 @@ pub fn run() -> Result<(), String> {
         presence: 0,
         last_active: now,
         ui_pages: HashMap::new(),
+        ui_cookies: HashMap::new(),
     };
     let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|e| e.to_string())?;
     rt.block_on(async move {
@@ -1725,6 +1759,16 @@ mod tests {
         assert!(!p.alive(1000 + UI_IDLE));
         let p = UiPage { made: 0, seen: UI_MAX, visited: true };
         assert!(!p.alive(UI_MAX), "12 hours at most");
+    }
+
+    #[test]
+    fn the_reopen_cookie_is_found_by_name() {
+        let mut req = http::Request { method: "GET".into(), path: "/ui".into(), query: HashMap::new(), headers: HashMap::new(), body: Vec::new() };
+        assert_eq!(cookie(&req, "denden_ui_4242"), None);
+        req.headers.insert("cookie".into(), "a=1; denden_ui_4242=abc; denden_ui_5000=def".into());
+        assert_eq!(cookie(&req, "denden_ui_4242"), Some("abc"));
+        assert_eq!(cookie(&req, "denden_ui_5000"), Some("def"));
+        assert_eq!(cookie(&req, "denden_ui_42"), None);
     }
 
     #[test]
