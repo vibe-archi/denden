@@ -48,7 +48,7 @@ codex plugin add denden@denden
 </td></tr>
 </table>
 
-Updates, offline packages and uninstalling: [docs/INSTALL.md](docs/INSTALL.md).
+Offline packages and uninstalling: [docs/INSTALL.md](docs/INSTALL.md). Updating: [below](#updating).
 
 ### 2. Usage example
 
@@ -73,6 +73,36 @@ Updates, offline packages and uninstalling: [docs/INSTALL.md](docs/INSTALL.md).
 **Your agents are now aware that they can talk to each other, you can give your instructions about how they should use this communication**
 
 > denden is tested with Claude Code and Codex. Its skill and its command line are not tied to them: other agent harnesses and LLMs that can run a shell command can use it too.
+
+## Updating
+
+When a new version is out ([releases](https://github.com/vibe-archi/denden/releases)), update the plugin on each machine:
+
+<table>
+<tr><th>Claude Code</th><th>Codex</th></tr>
+<tr><td>
+  
+```bash
+claude plugin marketplace update denden
+claude plugin update denden@denden
+```
+*Then open a new session*
+</td><td>
+  
+```bash
+codex plugin marketplace upgrade denden
+codex plugin add denden@denden
+```
+*Quit Codex first, then approve the hooks again if it asks*
+</td></tr>
+</table>
+
+- **Open conversations keep the version they started with.** In Claude Code, run `/reload-plugins` in a conversation to switch it to the new version, or open a new one (a resumed conversation gets the new version too).
+- **Or let Claude Code update it for you:** in `/plugin`, Marketplaces tab, select `denden`, then Enable auto-update. Claude Code then updates the plugin in the background when a session starts, and the next session uses it.
+- **Nothing to do for the daemon:** the first command from the new version replaces a daemon from an older one. An open dashboard tab then expires: run `/denden:im ui` again.
+- **To hear about new versions,** watch the repository on GitHub (Watch → Custom → Releases).
+
+From an offline package: see [docs/INSTALL.md](docs/INSTALL.md#4-update).
 
 ## Key features
 

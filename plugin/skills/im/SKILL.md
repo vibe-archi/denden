@@ -38,7 +38,7 @@ In Claude Code, the arguments given to the skill are: `$ARGUMENTS`. In Codex, th
 | `pause` / `resume` | `DENDEN pause` / `DENDEN resume`, then "Listening" below |
 | `detach`, `delete <name>`, `block <machine>`, `unblock <machine>`, `leave <channel>`, `check`, `open <url>` | the same `DENDEN` command |
 | `link` | `DENDEN link`: a short `denden` command for the user's own terminal (Linux, macOS) |
-| `ui` | `DENDEN ui`: opens this machine's dashboard in the user's browser (read only). Relay what it prints. Its address shows every message of the machine: never ask for it, never print it, never open or read that page yourself |
+| `ui` | `DENDEN ui`: opens this machine's dashboard in the user's browser (read only). Relay what it prints, its `http://127.0.0.1:<port>/ui` link included: that link holds no key and reopens the dashboard only in the user's own browser. The dashboard itself shows every message of the machine: never ask for its full address, never open, fetch or read it yourself |
 
 `<to>` is a name (`back`), a list (`api,stress,db`) or `all` for the whole channel. Multi-line text: `DENDEN send <to> -` with the text on stdin (a quoted heredoc, `<<'EOF'`).
 
