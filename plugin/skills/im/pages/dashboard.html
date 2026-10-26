@@ -1,8 +1,10 @@
 <!doctype html>
 <!--
   denden dashboard: served by the daemon at /ui/<token> (crates/denden/src/daemon.rs, ui_route), which
-  replaces the two placeholders NONCE and CONFIG, each written once below between double braces
+  replaces the placeholders NONCE (on both scripts) and CONFIG (once), between double braces below
   (CONFIG is JSON with "<" escaped, so it cannot close the script tag).
+  Theme: light or dark, the one picked with the button (a cookie, shared by the dashboards of this
+  machine whatever their port), else the system's.
   Read only: it polls GET <api> every few seconds with the x-denden header, sending what it already has
   (after=<cid>:<seq>,...), and gets back only what is new. Message texts come from other machines:
   they are only ever set as textContent, never as HTML.
@@ -19,14 +21,18 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext x='16' y='25' font-size='24' text-anchor='middle'%3E%F0%9F%90%8C%3C/text%3E%3C/svg%3E">
 <style>
 :root {
+  color-scheme: dark;
   --bg: #0b0d14; --bg2: #11152a; --panel: rgba(255, 255, 255, .035); --panel2: rgba(255, 255, 255, .065);
   --fg: #eef0f7; --muted: #9aa1b8; --faint: #646a82; --line: rgba(255, 255, 255, .09);
   --a1: #35d0ba; --a2: #8b7bff; --ok: #3ddc97; --warn: #f5b95b; --err: #ff6b7d; --sat: 62%; --lum: 72%;
+  --odd: rgba(255, 255, 255, .012); --even: rgba(255, 255, 255, .07); --bar: rgba(255, 255, 255, .075);
 }
-@media (prefers-color-scheme: light) {
-  :root { --bg: #f4f5fa; --bg2: #e6e9f5; --panel: rgba(255, 255, 255, .75); --panel2: rgba(20, 24, 40, .055);
-    --fg: #141726; --muted: #5a6176; --faint: #8b91a5; --line: rgba(20, 24, 40, .1);
-    --a1: #0fa38d; --a2: #6a5af9; --ok: #12935e; --warn: #a8690f; --err: #d43a4f; --sat: 55%; --lum: 36%; }
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f4f5fa; --bg2: #e6e9f5; --panel: rgba(255, 255, 255, .75); --panel2: rgba(20, 24, 40, .055);
+  --fg: #141726; --muted: #5a6176; --faint: #8b91a5; --line: rgba(20, 24, 40, .1);
+  --a1: #0fa38d; --a2: #6a5af9; --ok: #12935e; --warn: #a8690f; --err: #d43a4f; --sat: 55%; --lum: 36%;
+  --odd: rgba(255, 255, 255, .9); --even: rgba(20, 24, 40, .035); --bar: rgba(20, 24, 40, .055);
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
@@ -50,6 +56,8 @@ button { font: inherit; color: inherit; }
 .live { margin-left: auto; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
 .pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); animation: pulse 2s infinite; }
 .live.down .pulse { background: var(--err); animation: none; }
+.theme { appearance: none; flex: none; width: 32px; height: 28px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); cursor: pointer; font-size: 14px; line-height: 1; }
+.theme:hover { background: var(--panel2); }
 @keyframes pulse { 50% { opacity: .35; } }
 
 /* layout: three columns when wide, two (who's here under the channels) in between, one when narrow */
@@ -106,9 +114,12 @@ main { grid-area: main; min-width: 0; min-height: 0; display: flex; flex-directi
 .feed { flex: 1; min-height: 0; overflow: auto; padding: 4px 22px 28px; }
 .day { display: flex; align-items: center; gap: 12px; margin: 18px 0 6px; color: var(--faint); font-size: 11.5px; font-weight: 600; }
 .day::before, .day::after { content: ""; height: 1px; flex: 1; background: var(--line); }
-.msg { padding: 7px 10px; border-radius: 10px; margin: 0 -10px; }
-.msg:hover { background: var(--panel); }
-.msg.more { padding-top: 0; margin-top: -4px; }
+.block { margin: 8px 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.block.odd { background: var(--odd); }
+.block.even { background: var(--even); }
+.bar { padding: 6px 12px; background: var(--bar); border-bottom: 1px solid var(--line); }
+.body { padding: 8px 12px 9px; }
+.msg.more .body { padding-top: 0; }
 .msg.flash { animation: flash 1.6s ease; }
 @keyframes flash { 0%, 40% { background: color-mix(in srgb, var(--a2) 22%, transparent); } }
 .meta { display: flex; align-items: baseline; flex-wrap: wrap; gap: 3px 8px; }
@@ -137,12 +148,17 @@ time { margin-left: auto; font-size: 11.5px; color: var(--faint); font-variant-n
 .gone a { color: var(--a2); font-weight: 600; }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
 </style>
+<script nonce="{{NONCE}}">
+  // The theme before the first paint: the one picked here, else the system's.
+  document.documentElement.dataset.theme = /(?:^|; )denden_theme=(light|dark)/.exec(document.cookie)?.[1] || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
+</script>
 </head>
 <body>
 <header class="top">
   <div class="logo" aria-hidden="true">🐌</div>
   <h1>denden <span class="machine" id="machine"></span></h1>
   <div class="live" id="live" role="status"><span class="pulse"></span><span id="clock">connecting…</span></div>
+  <button class="theme" id="theme" type="button"></button>
 </header>
 <div class="layout">
   <aside>
@@ -461,6 +477,28 @@ time { margin-left: auto; font-size: 11.5px; color: var(--faint); font-variant-n
 
   $('filter').addEventListener('click', () => select(sel, ''))
 
+  // Light or dark: the pick lives in a cookie for every dashboard of this machine; until one is
+  // picked, the page follows the system.
+  const html = document.documentElement
+  const picked = () => /(?:^|; )denden_theme=(light|dark)/.test(document.cookie)
+  function drawTheme() {
+    const light = html.dataset.theme === 'light'
+    $('theme').textContent = light ? '🌙' : '☀️'
+    $('theme').title = light ? 'Switch to the dark theme' : 'Switch to the light theme'
+    $('theme').setAttribute('aria-label', $('theme').title)
+  }
+  $('theme').addEventListener('click', () => {
+    html.dataset.theme = html.dataset.theme === 'light' ? 'dark' : 'light'
+    document.cookie = `denden_theme=${html.dataset.theme}; Path=/; Max-Age=31536000; SameSite=Strict`
+    drawTheme()
+  })
+  matchMedia('(prefers-color-scheme: light)').addEventListener('change', (e) => {
+    if (picked()) return
+    html.dataset.theme = e.matches ? 'light' : 'dark'
+    drawTheme()
+  })
+  drawTheme()
+
   // The feed follows the newest message until the reader scrolls up, and stays where they are then.
   let lastFeed = null, stick = true
   function drawFeed(ch) {
@@ -477,7 +515,8 @@ time { margin-left: auto; font-size: 11.5px; color: var(--faint); font-variant-n
       none.append(el('b', null, filter ? `No messages from or to 🐌 ${filter} yet` : 'No messages yet'), document.createTextNode('The messages of this machine’s denden show here.'))
       box.append(none)
     }
-    let current = '', prev = null
+    // Each block (a header and the messages that follow it) takes the other shade than the one before.
+    let current = '', prev = null, block = null, blocks = 0
     for (const m of shown) {
       const dd = day(m.at)
       if (dd !== current) {
@@ -492,7 +531,8 @@ time { margin-left: auto; font-size: 11.5px; color: var(--faint); font-variant-n
       // A message right after one with the same sender and recipients, nothing special: no header.
       const plain = !m.ask && !m.re && !m.late
       const more = plain && prev && prev.plain && prev.from === m.from && JSON.stringify(prev.to) === JSON.stringify(m.to) && m.at - prev.at < 5 * 60000
-      box.append(message(ch, m, more))
+      if (!more) box.append((block = el('div', `block ${blocks++ % 2 ? 'even' : 'odd'}`)))
+      block.append(message(ch, m, more))
       prev = { from: m.from, to: m.to, at: m.at, plain }
     }
     box.scrollTop = stick ? box.scrollHeight : at
@@ -503,7 +543,7 @@ time { margin-left: auto; font-size: 11.5px; color: var(--faint); font-variant-n
     art.dataset.id = m.id
     art.style.setProperty('--h', hue(m.from || '?'))
     if (!more) {
-      const meta = el('div', 'meta')
+      const meta = el('div', 'meta bar')
       meta.append(el('span', 'from', `🐌 ${m.from || 'unknown'}`))
       meta.append(el('span', 'to', m.to === 'all' ? '→ 📣 everyone' : `→ ${(Array.isArray(m.to) ? m.to : [m.to]).map((n) => `🐌 ${n}`).join(', ')}`))
       if (m.ask) {
@@ -518,12 +558,14 @@ time { margin-left: auto; font-size: 11.5px; color: var(--faint); font-variant-n
       meta.append(stamp(m))
       art.append(meta)
     }
+    const body = el('div', 'body')
+    art.append(body)
     if (m.re) {
       const q = el('button', 're', `↩️ answers: ${m.reText || 'an earlier question'}`)
       q.type = 'button'
       q.title = 'Show the question'
       q.addEventListener('click', () => reveal(m.re))
-      art.append(q)
+      body.append(q)
     }
     const key = `${m.from}/${m.id}`
     const text = el('div', 'text', m.text ?? '')
@@ -531,9 +573,9 @@ time { margin-left: auto; font-size: 11.5px; color: var(--faint); font-variant-n
       const row = el('div', 'meta')
       text.style.flex = '1'
       row.append(text, stamp(m))
-      art.append(row)
+      body.append(row)
     } else {
-      art.append(text)
+      body.append(text)
     }
     if ((m.text || '').split('\n').length > 15 || (m.text || '').length > 1500) {
       const open = opened.has(key)
@@ -545,10 +587,10 @@ time { margin-left: auto; font-size: 11.5px; color: var(--faint); font-variant-n
         stick = false
         render()
       })
-      art.append(t)
+      body.append(t)
     }
     const unseen = ch.info.unseen?.[key]
-    if (unseen?.length) art.append(el('div', 'waiting', `⏳ not seen yet by ${unseen.map((d) => `🐌 ${d}`).join(', ')}`))
+    if (unseen?.length) body.append(el('div', 'waiting', `⏳ not seen yet by ${unseen.map((d) => `🐌 ${d}`).join(', ')}`))
     return art
   }
 
