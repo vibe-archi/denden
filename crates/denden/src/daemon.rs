@@ -1201,7 +1201,8 @@ fn ui_route(shared: &Shared, req: &http::Request) -> Vec<u8> {
         ("GET", "") => {
             let nonce = random_hex(16);
             let config = json!({ "api": format!("/ui/{tok}/api/state"), "poll": 2000 }).to_string().replace('<', "\\u003c");
-            let html = DASHBOARD.replacen("{{NONCE}}", &nonce, 1).replacen("{{CONFIG}}", &config, 1);
+            // The nonce goes on both scripts (the theme, before the first paint; the page).
+            let html = DASHBOARD.replace("{{NONCE}}", &nonce).replacen("{{CONFIG}}", &config, 1);
             let csp = format!("default-src 'none'; style-src 'unsafe-inline'; img-src data:; script-src 'nonce-{nonce}'; connect-src 'self'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'");
             let mut headers = vec![("content-type", "text/html; charset=utf-8".to_string()), ("content-security-policy", csp), ("cache-control", "no-store".into()), ("referrer-policy", "no-referrer".into()), ("x-content-type-options", "nosniff".into())];
             if !known {
