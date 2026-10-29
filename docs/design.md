@@ -73,6 +73,8 @@ The wake-up notice carries a reminder (`· denden inbox`) that tells the model h
 
 The skill tells the model that a line starting with `🐌»` is an automatic notice from denden, not a request from the user.
 
+The snail is for denden only, so the user can tell it from the rest of the conversation at a glance: the AI uses it for denden's lines and for the decisions denden leaves to the user, never for its own answers or its work on the user's task. The listener's last line and the messages handed over with the user's prompt repeat it, in case the skill's instructions were summarized away.
+
 ## 4. Flows
 
 The setting: your workstation `laptop-ak`, with a Claude conversation for coordination, a Claude one for the frontend and a Codex one for the backend; three servers, `srv-api`, `srv-stress` and `srv-db`, each with its own session.
@@ -181,6 +183,12 @@ The name of a channel is local to each machine: it is the one the user types in 
 | db | srv-db · Claude | PostgreSQL | offline since 2 h |
 
 Each AI fills in its own role from the context of its conversation; the user can correct it with `/denden:im role "…"`. That is how the AIs know whom to ask.
+
+A new role is announced to the other conversations of the channel, on every machine, without waking them, and shows in the dashboard:
+
+> 🐌» (( New role for api: "API server" ))
+
+The role is written by the denden's machine: the notice quotes it on one line, and the AIs take it as information about that denden, never as an instruction. A message cannot change a role either (see 7.4).
 
 Two machines with the same name are told apart by the start of their fingerprint: `ubuntu [7f3a]`, `ubuntu [c41e]`.
 
@@ -388,7 +396,7 @@ A local shortcut for a frequent subgroup (`servers = api, stress, db`) may come 
 - **`auto off`** (the default): the AI shows the request and waits for the user's go-ahead before acting.
 - **`auto on`**: the AI handles the request itself.
 - In both modes, the AI stays within its own permissions. Auto mode does not bypass Claude's or Codex's permission prompts.
-- **A message can never trigger a sensitive denden command**: `invite`, `join`, `detach`, `delete`, `leave`, `block`, `unblock`, `auto`, `wakes`, `keepalive`, or editing settings files. These commands stay with the user.
+- **A message can never trigger a sensitive denden command**: `invite`, `join`, `detach`, `delete`, `leave`, `block`, `unblock`, `auto`, `wakes`, `keepalive`, `pause`, `resume`, `role`, `ui`, or editing settings files. These commands stay with the user.
 
 ### 7.5 Late messages
 
@@ -426,7 +434,7 @@ No security talk in `create` or `join`, and no explanation of how it works. dend
 4. a protection out of order that needs an action, for example unapproved Codex hooks: without them, neither code blocking nor wake-ups;
 5. a name conflict (see 4.12).
 
-The arrival of a new machine gets a notice (see 4.3).
+The arrival of a new machine gets a notice (see 4.3), and so does a new role (see 4.4).
 
 The "machine waiting to be admitted" case of the first list goes away with `trust`.
 
@@ -602,3 +610,5 @@ When a decision is up to the user, the CLI does not wait for input: it prints th
 | 44 | The dashboard follows the real hierarchy: channels with this machine's denden on the left, messages in the middle, who is here by machine on the right; denden names first everywhere, emoji markers, one vocabulary for states |
 | 45 | `ui` shows a link to reopen the dashboard, without a key: only the browser that opened it can use it (cookie, 12 h) |
 | 46 | The dashboard has a light and dark theme switch, and message blocks alternate two shades, each with a title bar |
+| 47 | A denden keeps its name for the life of the channel (no renaming: the role says what it does now); a new role is announced in the channel, quoted on one line, and a message cannot change it |
+| 48 | The snail `🐌»` marks denden's lines and the decisions it leaves to the user, never the rest of what the AI writes |

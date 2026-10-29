@@ -598,6 +598,10 @@ time { margin-left: auto; font-size: 11.5px; color: var(--faint); font-variant-n
   function eventText(m) {
     const joined = /^New machine in .+?: (.+) \[([0-9a-f-]+)\], invited by (.+)$/.exec(m.text || '')
     if (joined) return `💻 ${joined[1]} joined, invited by 💻 ${joined[3]}`
+    const role = /^New role for (\S+): "(.*)"$/.exec(m.text || '')
+    if (role) return `🐌 ${role[1]} · new role: ${role[2]}`
+    const unset = /^(\S+) no longer has a role$/.exec(m.text || '')
+    if (unset) return `🐌 ${unset[1]} · role removed`
     return `${m.alert && !/^⚠/.test(m.text) ? '⚠️ ' : ''}${m.text}`
   }
 
