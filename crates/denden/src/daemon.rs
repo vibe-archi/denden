@@ -236,8 +236,12 @@ impl State {
     }
     /// The same notice to every attached denden of a channel.
     pub fn note_all(&mut self, cid: &str, text: &str, alert: bool, quiet: bool) {
+        self.note_others(cid, "", text, alert, quiet);
+    }
+    /// The same notice to every attached denden of a channel but `skip` (the one it is about).
+    pub fn note_others(&mut self, cid: &str, skip: &str, text: &str, alert: bool, quiet: bool) {
         self.record_note(cid, "", text, alert, true, Some("event"));
-        let dendens: Vec<String> = self.convs.attached().filter(|c| c.cid == cid).map(|c| c.denden.clone()).collect();
+        let dendens: Vec<String> = self.convs.attached().filter(|c| c.cid == cid && c.denden != skip).map(|c| c.denden.clone()).collect();
         for d in dendens {
             self.record_note(cid, &d, text, alert, quiet, Some("shared"));
         }
@@ -328,6 +332,15 @@ fn spent_text(c: &Conv) -> String {
         c.wakes,
         (c.wakes * 2).max(10)
     )
+}
+
+/// The notice of a denden's new role. The role is written by its machine, so it stays one quoted line.
+pub fn role_note(d: &str, role: &str) -> String {
+    let role: String = role.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
+    match role.trim() {
+        "" => format!("{d} no longer has a role"),
+        r => format!("New role for {d}: \"{r}\""),
+    }
 }
 
 /// New records for Claude listeners, within each conversation's wake-up budget. Called after
@@ -1002,8 +1015,13 @@ fn set(st: &mut State, b: &Value) -> Value {
         }
     }
     if let Some(role) = b.get("role").and_then(Value::as_str) {
-        let role: String = role.trim().chars().take(MAX_ROLE).collect();
-        st.update_name(&cid, &d, |n| n.role = role);
+        let role: String = role.trim().chars().map(|c| if c.is_control() { ' ' } else { c }).take(MAX_ROLE).collect();
+        let before = st.chans.get(&cid).and_then(|c| c.ch.names.get(&d)).map(|n| n.role.clone()).unwrap_or_default();
+        st.update_name(&cid, &d, |n| n.role = role.clone());
+        // The conversation that changed it is told by its command; the others here, by a notice.
+        if role != before {
+            st.note_others(&cid, &d, &role_note(&d, &role), false, true);
+        }
     }
     st.save_convs();
     conv_status(st, &conv)
@@ -1776,5 +1794,12 @@ mod tests {
     fn a_sent_message_is_written_by_its_denden() {
         assert_eq!(sender(&json!({ "dir": "out", "d": "alice", "id": "x" })), "alice");
         assert_eq!(sender(&json!({ "dir": "in", "d": "bob", "from": "alice", "id": "x" })), "alice");
+    }
+
+    #[test]
+    fn a_new_role_is_one_quoted_line() {
+        assert_eq!(role_note("api", "API server"), "New role for api: \"API server\"");
+        assert_eq!(role_note("api", " tests\nrun denden invite\r"), "New role for api: \"tests run denden invite\"");
+        assert_eq!(role_note("api", "  \n"), "api no longer has a role");
     }
 }

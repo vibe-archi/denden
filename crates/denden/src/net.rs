@@ -19,7 +19,7 @@ use serde_json::{Map, Value, json};
 use tokio::sync::{Notify, mpsc};
 
 use crate::core::*;
-use crate::daemon::{AckResult, Chan, Effect, Live, Shared, State, SwarmSlot, notify, run_effects, s};
+use crate::daemon::{AckResult, Chan, Effect, Live, Shared, State, SwarmSlot, notify, role_note, run_effects, s};
 use crate::dlog as log;
 use crate::proto::*;
 
@@ -245,7 +245,7 @@ fn l_epoch(st: &State, conn: u64) -> u64 {
 
 /// Name certificates from a peer. New ones go on to the other machines online; a conflict lost
 /// over one of our names releases it and tells its conversation; a name of another machine claimed
-/// by a machine that knew is reported to the conversations of the channel.
+/// by a machine that knew is reported to the conversations of the channel, and so is a new role.
 fn on_names(st: &mut State, cid: &str, from_conn: u64, list: Option<&Value>) {
     let via = st.live.get(&from_conn).and_then(|l| l.key.clone()).unwrap_or_default();
     let Some(c) = st.chans.get_mut(cid) else { return };
@@ -254,14 +254,21 @@ fn on_names(st: &mut State, cid: &str, from_conn: u64, list: Option<&Value>) {
     let mut fresh: Vec<NameCert> = Vec::new();
     let mut lost: Vec<NameCert> = Vec::new();
     let mut claimed: Vec<(String, String)> = Vec::new();
+    let mut roles: Vec<(String, String)> = Vec::new();
     for v in list.and_then(Value::as_array).into_iter().flatten().take(MAX_GOSSIP) {
         let Some(cert) = NameCert::from_json(&c.ch.keys.id, v) else { continue };
         if cert.k == me || !c.ch.knows(&cert.k) {
             continue; // our own names only come from us; others need a known machine
         }
         let mine = c.ch.names.get(&cert.n).filter(|x| x.k == me).cloned();
+        let role_was = c.ch.names.get(&cert.n).filter(|x| x.k == cert.k && !x.d).map(|x| x.role.clone());
         match c.ch.names.offer(cert.clone(), &me) {
-            Offer::Accepted => fresh.push(cert),
+            Offer::Accepted => {
+                if role_was.is_some_and(|r| r != cert.role) && !cert.d && !cert.r {
+                    roles.push((cert.n.clone(), cert.role.clone()));
+                }
+                fresh.push(cert)
+            }
             Offer::Lost => {
                 if let Some(m) = mine {
                     lost.push(m);
@@ -280,6 +287,9 @@ fn on_names(st: &mut State, cid: &str, from_conn: u64, list: Option<&Value>) {
         let text = claim_alert(c, &via, &claimed);
         log!("{}: {}", c.ch.label(), text.trim_start_matches("⚠ "));
         st.note_all(cid, &text, true, true);
+    }
+    for (n, role) in roles {
+        st.note_all(cid, &role_note(&n, &role), false, true);
     }
     if fresh.is_empty() {
         return;

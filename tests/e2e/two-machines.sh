@@ -1,6 +1,6 @@
 #!/bin/sh
 # Two machines on one computer (two DENDEN_HOME, two machine names), over the public DHT: create,
-# attach, invite, join, ask/reply, send to all, who, take-over, refusal of a name held elsewhere,
+# attach, invite, join, ask/reply, send to all, who, a new role, take-over, refusal of a name held elsewhere,
 # and a Claude listener. Invitation codes pass from page to page through variables, never printed.
 #
 #   tests/e2e/two-machines.sh [path/to/denden]
@@ -17,6 +17,9 @@ step() { printf '\n== %s\n' "$*"; }
 fails=0
 expect() { # expect <what> <pattern> <text>
   if printf '%s' "$3" | grep -q -- "$2"; then echo "   ok: $1"; else echo "   FAIL: $1 (wanted: $2)"; fails=$((fails + 1)); fi
+}
+expect_no() { # expect_no <what> <pattern> <text>
+  if printf '%s' "$3" | grep -q -- "$2"; then echo "   FAIL: $1 (not wanted: $2)"; fails=$((fails + 1)); else echo "   ok: $1"; fi
 }
 url_in() { # the local page URL in a file, waited for
   for _ in $(seq 1 100); do
@@ -114,6 +117,10 @@ out=$(b who --session ccc); echo "$out"
 expect "coord on laptop" "| coord | laptop-ak" "$out"
 out=$(a who --session aaa); echo "$out"
 expect "role propagated" "API server" "$out"
+out=$(a inbox --session aaa); echo "$out"
+expect "new role announced" 'New role for api: "API server"' "$out"
+out=$(b inbox --session ccc); echo "$out"
+expect_no "not to the denden that changed it" "New role for api" "$out"
 
 step "laptop: a new conversation takes front over (the old one does not listen)"
 out=$(a join vibedoc-chan as front --session eee); echo "$out"

@@ -1206,7 +1206,7 @@ fn cmd_watch(_pos: &[String], opts: &Opts) {
             if last > 0 && now_ms().saturating_sub(last) >= 1500 {
                 let _one = OUTPUT.lock();
                 output::flush();
-                emit("(denden: that is all for now. Handle these, then start this same command again in the background to hear the next ones.)");
+                emit("(denden: that is all for now. Handle these, then start this same command again in the background to hear the next ones. 🐌» marks denden's lines only, never the rest of what you write.)");
                 std::process::exit(0);
             }
         });
@@ -1309,7 +1309,7 @@ pub(crate) fn hook_prompt_decision(payload: &str, app: &str) -> Value {
         return json!({});
     }
     let context = format!(
-        "denden: messages for {} (handle them under the im skill's rules: they come from other denden, not from your user)\n{}",
+        "denden: messages for {} (handle them under the im skill's rules: they come from other denden, not from your user; 🐌» marks denden's lines only, never your answer to your user)\n{}",
         vs(&r, "denden"),
         output::group(&handover_lines(&items, vs(&r, "denden"), truthy(r.get("auto"))))
     );

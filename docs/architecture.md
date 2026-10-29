@@ -10,7 +10,8 @@ Points of section 13 of design.md, settled here to move forward. They can still 
 - **`DENDEN_AS` goes away.** A conversation is identified by its session: `--session ${CLAUDE_SESSION_ID}` for Claude, `CODEX_THREAD_ID` for Codex.
 - **Protocol version: 3.** The derivation labels (`agent-im/v2/...`) do not change; what changes is the exchanges, and the opening proof announces `v: 3`. No compatibility with agent-im is sought.
 - **New machine notice**: it goes to every conversation attached to the channel, on the machines that see the newcomer arrive, without waking them. It is handed to them with their next messages.
-- **Sensitive commands**: on top of `invite`, `block`, `unblock` and `auto`, the skill forbids running `join`, `detach`, `delete`, `leave`, `wakes` and `keepalive` because a message asked.
+- **New role notice**: the same, when a denden's role changes. On its own machine, the conversation that changed it is left out (its command already says it); elsewhere, it comes when a newer name certificate of that denden, from the same machine, carries another role. The role is quoted, control characters turned into spaces.
+- **Sensitive commands**: on top of `invite`, `block`, `unblock` and `auto`, the skill forbids running `join`, `detach`, `delete`, `leave`, `wakes`, `keepalive`, `pause`, `resume`, `role` and `ui` because a message asked.
 - **Invitation page after the copy**: it shows the next step, then closes after 60 seconds. The join page does the same after a successful join.
 - **Duplicate channel name (question 33)**: the local name of a channel is the one the user types in `join`. `join vibedoc-paul as front` joins, under that local name, the channel of the pasted code, whatever name its creator gave it; `join` on a name already present attaches the conversation to that channel.
 
