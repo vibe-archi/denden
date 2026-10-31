@@ -1,14 +1,14 @@
 <!doctype html>
 <!--
   denden local page: one template for every page (invite, join, gone), filled by the denden binary
-  (crates/denden/src/ui.rs), which replaces the three placeholders LANG, NONCE and CONFIG, each
-  written once below between double braces (CONFIG is JSON with "<" escaped, so it cannot close the
-  script tag).
+  (crates/denden/src/ui.rs), which replaces the two placeholders NONCE and CONFIG, each written once
+  below between double braces (CONFIG is JSON with "<" escaped, so it cannot close the script tag).
+  English only.
   The invitation code is never shown and never in this HTML: the copy button fetches it from
   POST <page>/api/reveal on a human click and puts it straight into the clipboard, so a browser driven
   by an AI sees no code when it opens the page.
 -->
-<html lang="{{LANG}}">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -56,6 +56,7 @@ textarea {
 }
 textarea:focus { border-color: var(--a1); outline: none; }
 .clock { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; opacity: .8; }
+.note { margin: 0; padding-top: 18px; width: 100%; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
 .spin { width: 15px; height: 15px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: r .7s linear infinite; }
 @keyframes r { to { transform: rotate(360deg); } }
 [hidden] { display: none !important; }
@@ -68,33 +69,19 @@ textarea:focus { border-color: var(--a1); outline: none; }
 <script nonce="{{NONCE}}">
 (() => {
   const cfg = JSON.parse(document.getElementById('cfg').textContent)
-  const T = {
-    en: {
-      invite: (l) => `Invitation to <b>${l}</b>`, copy: 'Click to copy the code', copied: 'Code copied',
-      after: 'Send it privately, never in an AI chat. On the new machine: <code>/denden:im join &lt;channel&gt; as &lt;name&gt;</code>.',
-      used: 'This code was already copied from another page. Create a new invitation.',
-      manual: 'Copy it with Ctrl+C (⌘C), then send it privately to the other user.',
-      join: (l) => `Join <b>${l}</b>`, paste: 'Paste the invitation code', placeholder: 'denden_…',
-      pasteHint: 'Paste it in the box with Ctrl+V (⌘V), then press Enter.',
-      go: 'Join · or press Enter', invalid: 'Not an invitation code', joining: 'Joining…', joined: (l) => `Joined ${l}`,
-      back: 'Go back to your conversation: it is connecting.',
-      closes: 'Closes in', closed: 'This page is closed.', gone: 'This page has expired. Ask your conversation for a new one.',
-      network: 'The page is no longer active. Ask your conversation for a new one.'
-    },
-    fr: {
-      invite: (l) => `Invitation à <b>${l}</b>`, copy: 'Cliquer pour copier le code', copied: 'Code copié',
-      after: 'Envoyez-le en privé, jamais dans une conversation avec une IA. Sur la nouvelle machine : <code>/denden:im join &lt;canal&gt; as &lt;nom&gt;</code>.',
-      used: 'Ce code a déjà été copié depuis une autre page. Créez une nouvelle invitation.',
-      manual: 'Copiez-le avec Ctrl+C (⌘C), puis envoyez-le en privé à l\'autre utilisateur.',
-      join: (l) => `Rejoindre <b>${l}</b>`, paste: 'Coller le code d\'invitation', placeholder: 'denden_…',
-      pasteHint: 'Collez-le dans le cadre avec Ctrl+V (⌘V), puis appuyez sur Entrée.',
-      go: 'Rejoindre · ou appuyez sur Entrée', invalid: 'Ce n\'est pas un code d\'invitation', joining: 'Connexion…', joined: (l) => `Canal ${l} rejoint`,
-      back: 'Revenez à votre conversation : elle se connecte.',
-      closes: 'Fermeture dans', closed: 'Cette page est fermée.', gone: 'Cette page a expiré. Demandez-en une nouvelle à votre conversation.',
-      network: 'Cette page n\'est plus active. Demandez-en une nouvelle à votre conversation.'
-    }
+  const t = {
+    invite: (l) => `Invitation to <b>${l}</b>`, copy: 'Click to copy the code', copied: 'Code copied',
+    after: 'Send it privately, never in an AI chat. On the new machine: <code>/denden:im join &lt;channel&gt; as &lt;name&gt;</code>.',
+    used: 'This code was already copied from another page. Create a new invitation.',
+    manual: 'Copy it with Ctrl+C (⌘C), then send it privately to the other user.',
+    only: 'An invitation code is only needed for a remote computer that has not joined this channel yet.',
+    join: (l) => `Join <b>${l}</b>`, paste: 'Paste the invitation code', placeholder: 'denden_…',
+    pasteHint: 'Paste it in the box with Ctrl+V (⌘V), then press Enter.',
+    go: 'Join · or press Enter', invalid: 'Not an invitation code', joining: 'Joining…', joined: (l) => `Joined ${l}`,
+    back: 'Go back to your conversation: it is connecting.',
+    closes: 'Closes in', closed: 'This page is closed.', gone: 'This page has expired. Ask your conversation for a new one.',
+    network: 'The page is no longer active. Ask your conversation for a new one.'
   }
-  const t = T[cfg.lang] || T.en
   const app = document.getElementById('app')
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
   const logo = '<div class="logo" aria-hidden="true">🐌</div>'
@@ -133,7 +120,8 @@ textarea:focus { border-color: var(--a1); outline: none; }
   function invite() {
     app.innerHTML = `${logo}<h1>${t.invite(esc(cfg.label))}</h1>
       <button class="btn" id="go">${esc(t.copy)}</button>
-      <p class="next" id="next"></p><div class="clock" id="clock"></div>`
+      <p class="next" id="next"></p><div class="clock" id="clock"></div>
+      <p class="note">${esc(t.only)}</p>`
     clock()
     // The code stays in this closure; it enters the page only for the instant of a copy (or, when
     // the browser allows no copy at all, in a selected field the user copies by hand).

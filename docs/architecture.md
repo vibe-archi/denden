@@ -5,7 +5,7 @@ This document turns [design.md](design.md) into technical choices. It describes 
 ## 1. Choices made for the open points
 
 Points of section 13 of design.md, settled here to move forward. They can still be revised:
-- **Language of the fixed texts: English.** It is the language of the first approved examples (`Received message from bob@project-xx`) and that of a distributed plugin. The AI relays these lines in the user's language, keeping the `> 🐌» (( … ))` shape. The local pages are in English or French, after the browser's `Accept-Language`.
+- **Language of the fixed texts: English.** It is the language of the first approved examples (`Received message from bob@project-xx`) and that of a distributed plugin. The AI relays these lines in the user's language, keeping the `> 🐌» (( … ))` shape. The local pages are in English only, like the dashboard.
 - **Outputs on several lines**: a command gathers what it prints for the conversation and writes it at the end as one block, `> 🐌» ((`, one `> ` line each, `> ))` (`output::group`); a single line keeps `> 🐌» (( … ))`, a question comes after the block. Lines that cannot wait (a local page's address, printed before the page waits) go out at once. `who` puts its table in the block; `watch --once` writes its batch as one block. The skill asks the AI to group what it relays the same way.
 - **`DENDEN_AS` goes away.** A conversation is identified by its session: `--session ${CLAUDE_SESSION_ID}` for Claude, `CODEX_THREAD_ID` for Codex.
 - **Protocol version: 3.** The derivation labels (`agent-im/v2/...`) do not change; what changes is the exchanges, and the opening proof announces `v: 3`. No compatibility with agent-im is sought.
