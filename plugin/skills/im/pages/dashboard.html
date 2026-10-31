@@ -8,9 +8,9 @@
   Read only: it polls GET <api> every few seconds with the x-denden header, sending what it already has
   (after=<cid>:<seq>,...), and gets back only what is new. Message texts come from other machines:
   they are only ever set as textContent, never as HTML.
-  Layout: channels with this machine's denden on the left, the chosen channel's messages in the
-  middle, who is in it (by machine) on the right. Markers: 📡 channel, 💻 machine, 🐌 denden,
-  💬 conversation, ✨ AI.
+  Layout: the channels on the left, the chosen channel's messages in the middle, who is in it (by
+  machine) on the right. A click on a denden turns the middle into its page: its card, then what it
+  sent and received. Markers: 📡 channel, 💻 machine, 🐌 denden, 💬 conversation, ✨ AI.
 -->
 <html lang="en">
 <head>
@@ -20,24 +20,39 @@
 <title>denden dashboard</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext x='16' y='25' font-size='24' text-anchor='middle'%3E%F0%9F%90%8C%3C/text%3E%3C/svg%3E">
 <style>
+/* Flat and square: the columns fill their space, and shades, not borders, set things apart. */
 :root {
   color-scheme: dark;
-  --bg: #0b0d14; --bg2: #11152a; --panel: rgba(255, 255, 255, .035); --panel2: rgba(255, 255, 255, .065);
-  --fg: #eef0f7; --muted: #9aa1b8; --faint: #646a82; --line: rgba(255, 255, 255, .09);
-  --a1: #35d0ba; --a2: #8b7bff; --ok: #3ddc97; --warn: #f5b95b; --err: #ff6b7d; --sat: 62%; --lum: 72%;
-  --odd: rgba(255, 255, 255, .012); --even: rgba(255, 255, 255, .07); --bar: rgba(255, 255, 255, .075);
+  --rail: #0b0d13; --bg: #11141c; --head: #181c27; --odd: #161a24; --even: #1c202c;
+  --hover: rgba(255, 255, 255, .045); --chip: rgba(255, 255, 255, .075);
+  --fg: #eef0f7; --muted: #9aa1b8; --faint: #646a82;
+  --a1: #35d0ba; --a2: #8b7bff; --ok: #3ddc97; --warn: #f5b95b; --err: #ff6b7d; --tint: 11%; --lift: rgba(255, 255, 255, .03);
 }
 :root[data-theme="light"] {
   color-scheme: light;
-  --bg: #f4f5fa; --bg2: #e6e9f5; --panel: rgba(255, 255, 255, .75); --panel2: rgba(20, 24, 40, .055);
-  --fg: #141726; --muted: #5a6176; --faint: #8b91a5; --line: rgba(20, 24, 40, .1);
-  --a1: #0fa38d; --a2: #6a5af9; --ok: #12935e; --warn: #a8690f; --err: #d43a4f; --sat: 55%; --lum: 36%;
-  --odd: rgba(255, 255, 255, .9); --even: rgba(20, 24, 40, .035); --bar: rgba(20, 24, 40, .055);
+  --rail: #e3e6ee; --bg: #f4f5f9; --head: #ffffff; --odd: #ffffff; --even: #f9fafc;
+  --hover: rgba(20, 24, 40, .045); --chip: rgba(20, 24, 40, .065);
+  --fg: #141726; --muted: #5a6176; --faint: #8b91a5;
+  --a1: #0fa38d; --a2: #6a5af9; --ok: #12935e; --warn: #a8690f; --err: #d43a4f; --tint: 7%; --lift: rgba(255, 255, 255, .3);
 }
-* { box-sizing: border-box; }
+/* Ten pastel colours, one per denden in the order the channel got them (the eleventh takes the first
+   again): --pc, and --dc, the same deeper, for text and tints on the light theme. */
+.c0 { --pc: hsl(210 75% 78%); --dc: hsl(210 60% 38%); }
+.c1 { --pc: hsl(4 75% 78%); --dc: hsl(4 60% 40%); }
+.c2 { --pc: hsl(145 55% 72%); --dc: hsl(145 50% 30%); }
+.c3 { --pc: hsl(30 80% 76%); --dc: hsl(30 70% 36%); }
+.c4 { --pc: hsl(280 70% 80%); --dc: hsl(280 45% 42%); }
+.c5 { --pc: hsl(185 60% 72%); --dc: hsl(185 65% 28%); }
+.c6 { --pc: hsl(325 75% 80%); --dc: hsl(325 55% 40%); }
+.c7 { --pc: hsl(52 75% 72%); --dc: hsl(52 70% 28%); }
+.c8 { --pc: hsl(95 50% 72%); --dc: hsl(95 45% 30%); }
+.c9 { --pc: hsl(245 70% 82%); --dc: hsl(245 45% 46%); }
+.ink { color: var(--pc); }
+:root[data-theme="light"] .ink { color: var(--dc); }
+* { box-sizing: border-box; scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--fg) 18%, transparent) transparent; }
 html, body { height: 100%; margin: 0; }
 body {
-  color: var(--fg); background: var(--bg); background-image: radial-gradient(1100px 500px at 20% -10%, var(--bg2), transparent);
+  color: var(--fg); background: var(--rail);
   font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing: antialiased;
   display: grid; grid-template-rows: auto minmax(0, 1fr); overflow: hidden;
 }
@@ -49,101 +64,112 @@ button { font: inherit; color: inherit; }
 .dot::before { content: "●"; margin-right: 5px; font-size: 10px; vertical-align: 1px; }
 
 /* top bar */
-.top { display: flex; align-items: center; gap: 12px; padding: 11px 20px; border-bottom: 1px solid var(--line); }
-.logo { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; font-size: 17px; line-height: 1; background: linear-gradient(135deg, var(--a1), var(--a2)); flex: none; }
+.top { display: flex; align-items: center; gap: 12px; padding: 10px 20px; }
+.logo { width: 30px; height: 30px; display: grid; place-items: center; font-size: 17px; line-height: 1; background: linear-gradient(135deg, var(--a1), var(--a2)); flex: none; }
 .top h1 { margin: 0; font-size: 15px; font-weight: 650; }
 .top .machine { color: var(--muted); font-weight: 500; }
 .live { margin-left: auto; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
 .pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); animation: pulse 2s infinite; }
 .live.down .pulse { background: var(--err); animation: none; }
-.theme { appearance: none; flex: none; width: 32px; height: 28px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); cursor: pointer; font-size: 14px; line-height: 1; }
-.theme:hover { background: var(--panel2); }
+.theme { appearance: none; flex: none; width: 34px; height: 30px; border: 0; background: var(--chip); cursor: pointer; font-size: 14px; line-height: 1; }
+.theme:hover { background: color-mix(in srgb, var(--a2) 22%, transparent); }
 @keyframes pulse { 50% { opacity: .35; } }
 
 /* layout: three columns when wide, two (who's here under the channels) in between, one when narrow */
 .layout { display: grid; grid-template-columns: 290px minmax(0, 1fr) 290px; grid-template-areas: "side main who"; min-height: 0; }
 aside { display: contents; }
-#side { grid-area: side; border-right: 1px solid var(--line); }
-#who { grid-area: who; border-left: 1px solid var(--line); }
-#side, #who { overflow: auto; overflow-x: hidden; padding: 16px 12px 28px; }
-main { grid-area: main; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+#side { grid-area: side; }
+#who { grid-area: who; }
+#side, #who { overflow: auto; overflow-x: hidden; padding: 16px 0 28px; }
+main { grid-area: main; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--bg); }
 @media (max-width: 1179px) {
   .layout { grid-template-columns: 290px minmax(0, 1fr); grid-template-areas: "side main"; }
-  aside { display: block; grid-area: side; overflow: auto; border-right: 1px solid var(--line); padding-bottom: 28px; }
-  #side, #who { overflow: visible; border: 0; padding-bottom: 8px; }
-  #who { border-top: 1px solid var(--line); margin: 8px 12px 0; padding: 16px 0 0; }
+  aside { display: block; grid-area: side; overflow: auto; }
+  #side, #who { overflow: visible; padding-bottom: 16px; }
+  #who { background: color-mix(in srgb, var(--fg) 3%, var(--rail)); min-height: 100%; }
 }
 @media (max-width: 759px) {
   body { overflow: auto; display: block; }
   .layout { display: block; }
-  aside { border-right: 0; border-bottom: 1px solid var(--line); }
+  #who { min-height: 0; }
   .feed { overflow: visible !important; }
+  .head, .card, .day, .bar, .body, .event { padding-left: 16px; padding-right: 16px; }
 }
-.label { margin: 0 6px 10px; font-size: 11.5px; font-weight: 600; letter-spacing: .02em; color: var(--faint); }
-.hint { color: var(--muted); font-size: 12.5px; margin: 6px 0 0; }
+.label { margin: 0 20px 8px; font-size: 11px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); }
+.hint { color: var(--muted); font-size: 12.5px; margin: 4px 0 0; padding: 0 20px; }
 .hint code { color: var(--fg); display: block; margin-top: 2px; overflow-wrap: anywhere; }
 
-/* channels and this machine's denden */
-.chan { border-radius: 10px; padding: 6px; margin-bottom: 6px; }
-.chan.on { background: var(--panel2); }
-.chan-head { display: grid; grid-template-columns: 22px minmax(0, 1fr); align-items: start; }
-.fold { appearance: none; border: 0; background: none; cursor: pointer; color: var(--faint); width: 22px; height: 24px; padding: 0; border-radius: 6px; font-size: 11px; }
-.fold:hover { color: var(--fg); }
-.row { appearance: none; border: 0; background: none; text-align: left; width: 100%; cursor: pointer; border-radius: 8px; padding: 3px 6px; display: block; }
-.row:hover { background: var(--panel2); }
-.row.sel { background: color-mix(in srgb, var(--a2) 16%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--a2) 45%, transparent); }
+/* channels */
+#channels .row { padding: 10px 20px; }
+.row { appearance: none; border: 0; background: none; text-align: left; width: 100%; cursor: pointer; padding: 6px 20px; display: block; }
+.row:hover { background: var(--hover); }
+.row.sel { background: color-mix(in srgb, var(--a2) 17%, transparent); box-shadow: inset 3px 0 0 var(--a2); }
+.row:focus-visible { outline-offset: -2px; }
 .line { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sub { display: block; color: var(--muted); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .state { display: block; font-size: 12px; }
 .line .state { display: inline; margin-left: 2px; white-space: nowrap; }
-.count { margin-left: auto; flex: none; min-width: 20px; padding: 0 7px; border-radius: 10px; font-size: 11.5px; font-weight: 650; line-height: 20px; text-align: center; background: var(--a2); color: #fff; }
-.dens { margin: 4px 0 2px 22px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px; }
+.count { margin-left: auto; flex: none; min-width: 22px; padding: 0 7px; font-size: 11.5px; font-weight: 650; line-height: 20px; text-align: center; background: var(--a2); color: #fff; }
 
 /* who's here */
-.mach { margin: 0 6px 16px; }
+.mach { margin: 0 0 14px; }
+.mach > .line { padding: 0 20px; }
 .mach-name { font-weight: 600; }
-.mach > .state { margin: 0 0 4px 24px; }
-.mach .dens { margin-left: 18px; }
-.blocked { border-top: 1px solid var(--line); padding-top: 12px; margin: 4px 6px 0; color: var(--faint); }
+.mach > .state { padding: 0 20px 0 44px; margin-bottom: 4px; }
+.dens { display: grid; grid-template-columns: minmax(0, 1fr); }
+.dens .row { padding: 6px 20px 6px 44px; }
+.dens .hint { padding-left: 44px; }
+.blocked { padding: 12px 0 0; color: var(--faint); }
+.blocked > div:not(.label) { padding: 0 20px; }
 
 /* the channel and its messages */
-.head { padding: 14px 22px 12px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.head { padding: 15px 24px; background: var(--head); display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .head h2 { margin: 0; font-size: 18px; font-weight: 650; }
-.filter { appearance: none; margin-left: auto; border: 0; cursor: pointer; border-radius: 12px; padding: 2px 10px; font-size: 12.5px; background: color-mix(in srgb, var(--a2) 18%, transparent); color: var(--fg); }
-.feed { flex: 1; min-height: 0; overflow: auto; padding: 4px 22px 28px; }
-.day { display: flex; align-items: center; gap: 12px; margin: 18px 0 6px; color: var(--faint); font-size: 11.5px; font-weight: 600; }
-.day::before, .day::after { content: ""; height: 1px; flex: 1; background: var(--line); }
-.block { margin: 8px 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
-.block.odd { background: var(--odd); }
-.block.even { background: var(--even); }
-.bar { padding: 6px 12px; background: var(--bar); border-bottom: 1px solid var(--line); }
-.body { padding: 8px 12px 9px; }
+.back { appearance: none; margin-left: auto; border: 0; cursor: pointer; padding: 4px 12px; font-size: 12.5px; background: var(--chip); color: var(--fg); }
+.back:hover { background: color-mix(in srgb, var(--a2) 22%, transparent); }
+.card { padding: 14px 24px 16px; background: color-mix(in srgb, var(--pc, var(--a2)) var(--tint), var(--head)); }
+:root[data-theme="light"] .card { background: color-mix(in srgb, var(--dc, var(--a2)) var(--tint), var(--head)); }
+.card .label { margin: 0 0 3px; }
+.card .role { font-size: 15px; overflow-wrap: anywhere; }
+.facts { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 2px 8px; color: var(--muted); font-size: 12.5px; }
+.facts > * + *::before { content: "·"; margin-right: 8px; color: var(--faint); }
+.card .note { margin-top: 6px; color: var(--faint); font-size: 12px; }
+.feed { flex: 1; min-height: 0; overflow: auto; padding: 0 0 28px; }
+.day { padding: 18px 24px 8px; color: var(--faint); font-size: 11px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; }
+.block { margin-bottom: 2px; }
+/* a whole block in its sender's colour, over one of two shades; its title bar a touch lighter */
+.block.odd { --base: var(--odd); }
+.block.even { --base: var(--even); }
+.msg { background: color-mix(in srgb, var(--pc) var(--tint), var(--base)); }
+:root[data-theme="light"] .msg { background: color-mix(in srgb, var(--dc) var(--tint), var(--base)); }
+.bar { padding: 7px 24px; background: var(--lift); }
+.body { padding: 10px 24px 12px; }
 .msg.more .body { padding-top: 0; }
 .msg.flash { animation: flash 1.6s ease; }
 @keyframes flash { 0%, 40% { background: color-mix(in srgb, var(--a2) 22%, transparent); } }
 .meta { display: flex; align-items: baseline; flex-wrap: wrap; gap: 3px 8px; }
-.from { font-weight: 650; color: hsl(var(--h) var(--sat) var(--lum)); }
+.from { font-weight: 650; }
 .to { color: var(--muted); font-size: 12.5px; }
-.tag { font-size: 11.5px; line-height: 19px; padding: 0 8px; border-radius: 10px; white-space: nowrap; background: var(--panel2); color: var(--muted); }
+.tag { font-size: 11.5px; line-height: 20px; padding: 0 8px; white-space: nowrap; background: var(--chip); color: var(--muted); }
 .tag.q { color: var(--a2); background: color-mix(in srgb, var(--a2) 15%, transparent); }
 .tag.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
 .tag.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 15%, transparent); }
 time { margin-left: auto; font-size: 11.5px; color: var(--faint); font-variant-numeric: tabular-nums; }
-.re { appearance: none; display: block; text-align: left; border: 0; border-left: 2px solid var(--line); background: none; cursor: pointer; margin: 3px 0; padding: 0 8px; color: var(--muted); font-size: 12.5px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.re:hover { color: var(--fg); border-left-color: var(--a2); }
+.re { appearance: none; display: block; text-align: left; border: 0; background: var(--chip); cursor: pointer; margin: 0 0 7px; padding: 3px 10px; color: var(--muted); font-size: 12.5px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.re:hover { color: var(--fg); background: color-mix(in srgb, var(--a2) 20%, transparent); }
 .text { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 1px; min-width: 0; }
 .text.cut { max-height: 21em; overflow: hidden; -webkit-mask-image: linear-gradient(#000 70%, transparent); mask-image: linear-gradient(#000 70%, transparent); }
 .toggle { appearance: none; border: 0; background: none; cursor: pointer; color: var(--a2); padding: 2px 0; font-size: 12.5px; }
 .waiting { font-size: 12px; color: var(--warn); margin-top: 2px; }
-.event { text-align: center; color: var(--muted); font-size: 12.5px; margin: 10px 0; overflow-wrap: anywhere; }
+.event { text-align: center; color: var(--muted); font-size: 12.5px; padding: 9px 24px 11px; overflow-wrap: anywhere; }
 .event.alert { color: var(--warn); }
 .none { display: grid; place-items: center; text-align: center; color: var(--muted); padding: 60px 20px; }
 .none b { color: var(--fg); font-size: 15px; display: block; margin-bottom: 6px; }
 .none code { color: var(--fg); }
 
-.gone { position: fixed; inset: 0; display: grid; place-items: center; padding: 16px; background: color-mix(in srgb, var(--bg) 80%, transparent); backdrop-filter: blur(6px); }
-.gone div { max-width: 420px; text-align: center; padding: 28px; border: 1px solid var(--line); border-radius: 16px; background: var(--bg); display: grid; gap: 10px; }
+.gone { position: fixed; inset: 0; display: grid; place-items: center; padding: 16px; background: color-mix(in srgb, var(--rail) 80%, transparent); backdrop-filter: blur(6px); }
+.gone div { max-width: 420px; text-align: center; padding: 28px; background: var(--head); box-shadow: 0 24px 60px -20px rgba(0, 0, 0, .5); display: grid; gap: 10px; }
 .gone p { margin: 0; color: var(--muted); }
 .gone a { color: var(--a2); font-weight: 600; }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
@@ -168,8 +194,9 @@ time { margin-left: auto; font-size: 11.5px; color: var(--faint); font-variant-n
   <main>
     <div class="head" id="head" hidden>
       <h2 id="title"></h2><span class="muted" id="summary"></span>
-      <button class="filter" id="filter" type="button" hidden></button>
+      <button class="back" id="back" type="button" hidden></button>
     </div>
+    <div class="card" id="card" hidden></div>
     <div class="feed" id="feed"></div>
   </main>
 </div>
@@ -191,20 +218,23 @@ time { margin-left: auto; font-size: 11.5px; color: var(--faint); font-variant-n
     set: (k, v) => { try { sessionStorage.setItem(k, v) } catch {} },
   }
 
-  // cid -> { info, msgs, keys, answered, seq, count }: info is the last state the daemon sent, msgs
-  // the messages so far (the last 3000), answered the ids of questions a reply points to.
+  // cid -> { info, msgs, keys, answered, seq, count, colours }: info is the last state the daemon sent,
+  // msgs the messages so far (the last 3000), answered the ids of questions a reply points to,
+  // colours the palette slot of each denden (see colour()).
   const chans = new Map()
-  let sel = keep.get('sel'), filter = keep.get('filter') || '', gone = false, fails = 0, since = 0, last = 0
-  let folded
-  try { folded = new Set(JSON.parse(keep.get('folded') || '[]')) } catch { folded = new Set() }
+  // sel: the chosen channel; agent: the denden whose page shows in the middle, '' for the channel's.
+  let sel = keep.get('sel'), agent = keep.get('agent') || '', gone = false, fails = 0, since = 0, last = 0
   const opened = new Set()
   const drawn = {}
 
   const APPS = { claude: 'Claude Code', codex: 'Codex' }
   const appName = (a) => APPS[a] || a
-  const hue = (s) => { let h = 0; for (const c of s) h = (h * 31 + c.codePointAt(0)) % 360; return h }
   const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`
   const folder = (p) => (p || '').split(/[\\/]/).filter(Boolean).pop() || ''
+  const convName = (v) => v.title || folder(v.cwd) || 'conversation'
+  const convTip = (v) => `${v.cwd ? `${v.cwd} · ` : ''}active ${ago(v.seen)}`
+  // What the conversations of this machine have not seen yet in a channel.
+  const waiting = (c) => c.denden.reduce((n, d) => n + (d.mine && d.waiting || 0), 0)
   const day = (t) => {
     const d = new Date(t), now = new Date()
     if (d.toDateString() === now.toDateString()) return 'Today'
@@ -260,15 +290,17 @@ time { margin-left: auto; font-size: 11.5px; color: var(--faint); font-variant-n
       let ch = chans.get(c.cid)
       if (ch && ch.seq != null && c.seq < ch.seq) {
         // Its history was reset: start over with a full load.
-        chans.set(c.cid, { info: c, msgs: [], keys: new Set(), answered: new Set(), seq: null, count: 0 })
+        chans.set(c.cid, { info: c, msgs: [], keys: new Set(), answered: new Set(), seq: null, count: 0, colours: ch.colours })
         continue
       }
-      if (!ch) chans.set(c.cid, (ch = { msgs: [], keys: new Set(), answered: new Set(), seq: null, count: 0 }))
+      if (!ch) chans.set(c.cid, (ch = { msgs: [], keys: new Set(), answered: new Set(), seq: null, count: 0, colours: new Map() }))
       ch.info = c
+      for (const n of [...c.denden].sort((a, b) => (a.since || 0) - (b.since || 0) || a.name.localeCompare(b.name))) colour(ch, n.name)
       for (const m of c.messages) {
         const k = m.kind === 'event' ? `event/${m.seq}` : `${m.from}/${m.id}`
         if (ch.keys.has(k)) continue
         ch.keys.add(k)
+        if (m.kind !== 'event') colour(ch, m.from || '?')
         ch.msgs.push(m)
         if (m.re) ch.answered.add(m.re)
         ch.count++
@@ -279,9 +311,17 @@ time { margin-left: auto; font-size: 11.5px; color: var(--faint); font-variant-n
     for (const cid of [...chans.keys()]) if (!live.has(cid)) chans.delete(cid)
     if (!chans.has(sel)) {
       sel = chans.keys().next().value ?? null
-      filter = ''
+      agent = ''
     }
     render()
+  }
+
+  // A denden's colour, the class of its palette slot: the channel's denden take the ten slots in the
+  // order the channel got them, then the senders it no longer has, and after ten it starts over. A
+  // denden keeps its slot while the page is open.
+  function colour(ch, name) {
+    if (!ch.colours.has(name)) ch.colours.set(name, ch.colours.size % 10)
+    return `c${ch.colours.get(name)}`
   }
 
   // Each part is rebuilt only when what it shows changed, so focus and scrolling stay put; a
@@ -295,12 +335,14 @@ time { margin-left: auto; font-size: 11.5px; color: var(--faint); font-variant-n
     if (key) [...document.querySelectorAll('[data-key]')].find((e) => e.dataset.key === key)?.focus()
   }
 
-  function select(cid, who) {
+  function select(cid, name) {
     sel = cid
-    filter = who
+    agent = name
     keep.set('sel', cid || '')
-    keep.set('filter', who)
+    keep.set('agent', name)
     render()
+    // On a phone the middle comes below the lists: bring it into view.
+    if (cid && matchMedia('(max-width: 759px)').matches) $('head').scrollIntoView({ block: 'start' })
   }
 
   // ---------- states, in the user's words ----------
@@ -326,20 +368,23 @@ time { margin-left: auto; font-size: 11.5px; color: var(--faint); font-variant-n
 
   function render() {
     const list = [...chans.values()].map((c) => c.info).sort((a, b) => a.label.localeCompare(b.label))
-    part('channels', [list.map((c) => [c.cid, c.label, c.member, c.online, c.denden.filter((d) => d.mine)]), sel, filter, [...folded], Math.floor(Date.now() / 60000)], () => drawChannels(list))
+    part('channels', [list.map((c) => [c.cid, c.label, c.member, c.online, waiting(c)]), sel], () => drawChannels(list))
     const ch = chans.get(sel)
     $('head').hidden = $('who').hidden = !ch
     if (!ch) {
-      drawn.feed = null
+      drawn.feed = drawn.card = null
+      $('card').hidden = true
       const none = el('div', 'none')
       none.append(el('b', null, 'Create your first channel'), document.createTextNode('In a conversation: '), el('code', null, '/denden:im create <channel> as <name>'))
       $('feed').replaceChildren(none)
       return
     }
     const c = ch.info
-    part('who', [c.cid, c.machines, c.denden, filter, Math.floor(Date.now() / 60000)], () => drawWho(c))
-    part('head', [c.cid, c.label, c.member, c.machines, c.denden.length, filter], () => drawHead(c))
-    part('feed', [c.cid, filter, ch.count, c.unseen, ch.answered.size, [...opened]], () => drawFeed(ch))
+    const tick = Math.floor(Date.now() / 60000)
+    part('who', [c.cid, c.label, c.machines, c.denden, agent, tick], () => drawWho(c))
+    part('head', [c.cid, c.label, c.member, c.machines, c.denden.length, agent], () => drawHead(c))
+    part('card', [c.cid, agent, c.denden.find((d) => d.name === agent), c.machines, tick], () => drawCard(c))
+    part('feed', [c.cid, agent, ch.count, c.unseen, ch.answered.size, [...opened]], () => drawFeed(ch))
   }
 
   function drawChannels(list) {
@@ -347,74 +392,26 @@ time { margin-left: auto; font-size: 11.5px; color: var(--faint); font-variant-n
     box.replaceChildren()
     if (!list.length) box.append(el('p', 'hint', 'This machine is in no channel yet.'))
     for (const c of list) {
-      const wrap = el('div', 'chan' + (c.cid === sel ? ' on' : ''))
-      const head = el('div', 'chan-head')
-      const mine = c.denden.filter((d) => d.mine).sort((a, b) => a.name.localeCompare(b.name))
-      const isFolded = folded.has(c.cid)
-      const fold = el('button', 'fold', isFolded ? '▶' : '▼')
-      fold.type = 'button'
-      fold.dataset.key = `fold/${c.cid}`
-      fold.setAttribute('aria-expanded', String(!isFolded))
-      fold.setAttribute('aria-label', isFolded ? `Show the denden of ${c.label}` : `Hide the denden of ${c.label}`)
-      fold.addEventListener('click', () => {
-        isFolded ? folded.delete(c.cid) : folded.add(c.cid)
-        keep.set('folded', JSON.stringify([...folded]))
-        render()
-      })
-      const row = el('button', 'row' + (c.cid === sel && !filter ? ' sel' : ''))
+      const row = el('button', 'row' + (c.cid === sel ? ' sel' : ''))
       row.type = 'button'
       row.dataset.key = `chan/${c.cid}`
       const line = el('span', 'line')
       line.append(el('span', null, '📡'), el('span', 'name', c.label))
-      const waiting = mine.reduce((n, d) => n + (d.waiting || 0), 0)
-      if (waiting) {
-        const n = el('span', 'count', String(waiting))
-        n.title = 'messages not yet seen by the conversations of this machine'
-        line.append(n)
+      const n = waiting(c)
+      if (n) {
+        const count = el('span', 'count', String(n))
+        count.title = 'messages not yet seen by the conversations of this machine'
+        line.append(count)
       }
       const st = !c.member ? ['warn', 'Waiting to be admitted'] : c.online ? ['ok', `${plural(c.online, 'other machine')} online`] : ['faint', 'Nobody else online']
       row.append(line, el('span', `state dot ${st[0]}`, st[1]))
       row.addEventListener('click', () => select(c.cid, ''))
-      head.append(fold, row)
-      wrap.append(head)
-      if (!isFolded) {
-        const dens = el('div', 'dens')
-        if (!mine.length) {
-          const p = el('p', 'hint', 'No conversation of yours here yet')
-          p.append(el('code', null, `/denden:im join ${c.label} as …`))
-          dens.append(p)
-        }
-        for (const d of mine) dens.append(localRow(c, d))
-        wrap.append(dens)
-      }
-      box.append(wrap)
+      box.append(row)
     }
-  }
-
-  // 🐌 name / 💬 conversation · ✨ AI / state
-  function localRow(c, d) {
-    const b = el('button', 'row' + (c.cid === sel && filter === d.name ? ' sel' : ''))
-    b.type = 'button'
-    b.dataset.key = `mine/${c.cid}/${d.name}`
-    const line = el('span', 'line')
-    line.append(el('span', null, '🐌'), el('span', 'name', d.name))
-    b.append(line)
-    if (d.conv) {
-      const sub = el('span', 'sub', `💬 ${d.conv.title || folder(d.conv.cwd) || 'conversation'} · ✨ ${appName(d.conv.app)}`)
-      sub.title = `${d.conv.cwd ? `${d.conv.cwd} · ` : ''}active ${ago(d.conv.seen)}`
-      b.append(sub)
-    } else {
-      b.append(el('span', 'sub faint', '💬 no conversation'))
-    }
-    const st = localState(d)
-    const s = el('span', `state dot ${st.tone}`, st.text)
-    s.title = st.title
-    b.append(s)
-    b.addEventListener('click', () => select(c.cid, d.name))
-    return b
   }
 
   function drawWho(c) {
+    const ch = chans.get(c.cid)
     $('who-title').textContent = `Who's here · ${c.label}`
     const box = $('machines')
     box.replaceChildren()
@@ -429,23 +426,39 @@ time { margin-left: auto; font-size: 11.5px; color: var(--faint); font-variant-n
       const st = m.me ? ['faint', 'This machine'] : m.online ? ['ok', 'Online'] : m.connecting ? ['faint', 'Connecting…'] : ['faint', m.seen ? `Offline · last seen ${ago(m.seen)}` : 'Offline']
       sec.append(name, el('span', `state ${m.me ? '' : 'dot '}${st[0]}`, st[1]))
       const dens = el('div', 'dens')
+      // 🐌 name · state, then ✨ AI · role, and for this machine's ones 💬 the conversation holding it.
       for (const d of c.denden.filter((d) => d.machine === m.id).sort((a, b) => a.name.localeCompare(b.name))) {
-        const row = el('button', 'row' + (filter === d.name ? ' sel' : ''))
+        const row = el('button', `row ${colour(ch, d.name)}${agent === d.name ? ' sel' : ''}`)
         row.type = 'button'
         row.dataset.key = `who/${c.cid}/${d.name}`
         const line = el('span', 'line')
-        line.append(el('span', null, '🐌'), el('span', m.online || m.me ? 'name' : 'name muted', d.name))
+        line.append(el('span', null, '🐌'), el('span', m.online || m.me ? 'name ink' : 'name muted', d.name))
         const st = d.mine ? localState(d) : remoteState(d, m)
         if (st) {
           const s = el('span', `state dot ${st.tone}`, st.short)
           if (st.title) s.title = st.title
           line.append(s)
         }
+        if (d.mine && d.waiting) {
+          const count = el('span', 'count', String(d.waiting))
+          count.title = 'messages its conversation has not seen yet'
+          line.append(count)
+        }
         row.append(line)
-        const about = [d.app ? `✨ ${appName(d.app)}` : '', d.role].filter(Boolean).join(' · ')
-        if (about) row.append(el('span', 'sub', about))
+        const desc = [d.app ? `✨ ${appName(d.app)}` : '', d.role].filter(Boolean).join(' · ')
+        if (desc) row.append(el('span', 'sub', desc))
+        if (d.mine && d.conv) {
+          const sub = el('span', 'sub', `💬 ${convName(d.conv)}`)
+          sub.title = convTip(d.conv)
+          row.append(sub)
+        }
         row.addEventListener('click', () => select(c.cid, d.name))
         dens.append(row)
+      }
+      if (m.me && !dens.children.length) {
+        const p = el('p', 'hint', 'No conversation of yours here yet')
+        p.append(el('code', null, `/denden:im join ${c.label} as …`))
+        dens.append(p)
       }
       sec.append(dens)
       box.append(sec)
@@ -463,19 +476,63 @@ time { margin-left: auto; font-size: 11.5px; color: var(--faint); font-variant-n
     }
   }
 
+  // The channel's name and who is online, or the chosen denden's name and the way back to the channel.
   function drawHead(c) {
+    const back = $('back')
+    back.hidden = !agent
+    $('title').className = agent ? `ink ${colour(chans.get(c.cid), agent)}` : ''
+    if (agent) {
+      $('title').textContent = `🐌 ${agent}`
+      $('summary').textContent = ''
+      back.textContent = `← 📡 ${c.label}`
+      back.title = 'Show every message of the channel'
+      return
+    }
     $('title').textContent = `📡 ${c.label}`
     const machines = c.machines.filter((m) => !m.blocked)
     const online = machines.filter((m) => !m.me && m.online).map((m) => m.name)
     const who = online.length === 0 ? 'nobody else online' : online.length <= 2 ? `💻 ${online.join(', ')} online` : `${online.length} other machines online`
     $('summary').textContent = !c.member ? 'waiting to be admitted' : `${plural(machines.length, 'machine')} · ${c.denden.length} denden · ${who}`
-    const f = $('filter')
-    f.hidden = !filter
-    f.textContent = `Only 🐌 ${filter} ✕`
-    f.title = 'Show every message of the channel'
   }
 
-  $('filter').addEventListener('click', () => select(sel, ''))
+  $('back').addEventListener('click', () => select(sel, ''))
+
+  // The chosen denden's card: its role, then its machine, its AI, its conversation and its state.
+  function drawCard(c) {
+    const box = $('card')
+    box.hidden = !agent
+    box.replaceChildren()
+    if (!agent) return
+    box.className = `card ${colour(chans.get(c.cid), agent)}`
+    const d = c.denden.find((x) => x.name === agent)
+    if (!d) {
+      box.append(el('div', 'muted', `🐌 ${agent} is no longer in this channel.`))
+      return
+    }
+    const m = c.machines.find((x) => x.id === d.machine)
+    box.append(el('div', 'label', 'Role'), el('div', d.role ? 'role' : 'role faint', d.role || 'No role'))
+    const facts = el('div', 'facts')
+    const machine = el('span', null, `💻 ${m ? m.name : 'unknown machine'}${m?.me ? ' (this machine)' : ''}`)
+    if (m) machine.title = `fingerprint ${m.id}`
+    facts.append(machine)
+    if (d.app) facts.append(el('span', null, `✨ ${appName(d.app)}`))
+    if (d.mine && d.conv) {
+      const conv = el('span', null, `💬 ${convName(d.conv)}`)
+      conv.title = convTip(d.conv)
+      facts.append(conv)
+    }
+    if (d.mine) {
+      const st = localState(d)
+      const s = el('span', `dot ${st.tone}`, st.text)
+      s.title = st.title
+      facts.append(s)
+    } else {
+      const st = !m?.online ? ['faint', 'Offline'] : d.active ? ['ok', 'Online'] : ['muted', 'No conversation']
+      facts.append(el('span', `dot ${st[0]}`, st[1]))
+    }
+    box.append(facts)
+    if (!d.mine) box.append(el('div', 'note', 'Only its exchanges with the denden of this machine show here: the others never reach it.'))
+  }
 
   // Light or dark: the pick lives in a cookie for every dashboard of this machine; until one is
   // picked, the page follows the system.
@@ -503,16 +560,18 @@ time { margin-left: auto; font-size: 11.5px; color: var(--faint); font-variant-n
   let lastFeed = null, stick = true
   function drawFeed(ch) {
     const box = $('feed'), c = ch.info
-    if (lastFeed !== `${c.cid}|${filter}`) stick = true
-    lastFeed = `${c.cid}|${filter}`
+    if (lastFeed !== `${c.cid}|${agent}`) stick = true
+    lastFeed = `${c.cid}|${agent}`
     const at = box.scrollTop
     box.replaceChildren()
-    const shown = ch.msgs.filter((m) => m.kind === 'event'
-      ? !filter || !m.d || m.d === filter
-      : !filter || m.from === filter || m.to === 'all' || (Array.isArray(m.to) && m.to.includes(filter)))
+    // A denden's page: what it sent and received, and the events about it.
+    const shown = !agent ? ch.msgs : ch.msgs.filter((m) => m.kind === 'event'
+      ? m.d === agent || about(m) === agent
+      : m.from === agent || m.to === 'all' || m.to === agent || (Array.isArray(m.to) && m.to.includes(agent)))
     if (!shown.some((m) => m.kind !== 'event')) {
       const none = el('div', 'none')
-      none.append(el('b', null, filter ? `No messages from or to 🐌 ${filter} yet` : 'No messages yet'), document.createTextNode('The messages of this machine’s denden show here.'))
+      none.append(el('b', null, agent ? `No messages from or to 🐌 ${agent} yet` : 'No messages yet'))
+      if (!agent) none.append(document.createTextNode('The messages of this machine’s denden show here.'))
       box.append(none)
     }
     // Each block (a header and the messages that follow it) takes the other shade than the one before.
@@ -539,12 +598,11 @@ time { margin-left: auto; font-size: 11.5px; color: var(--faint); font-variant-n
   }
 
   function message(ch, m, more) {
-    const art = el('article', 'msg' + (more ? ' more' : ''))
+    const art = el('article', `msg ${colour(ch, m.from || '?')}${more ? ' more' : ''}`)
     art.dataset.id = m.id
-    art.style.setProperty('--h', hue(m.from || '?'))
     if (!more) {
       const meta = el('div', 'meta bar')
-      meta.append(el('span', 'from', `🐌 ${m.from || 'unknown'}`))
+      meta.append(el('span', 'from ink', `🐌 ${m.from || 'unknown'}`))
       meta.append(el('span', 'to', m.to === 'all' ? '→ 📣 everyone' : `→ ${(Array.isArray(m.to) ? m.to : [m.to]).map((n) => `🐌 ${n}`).join(', ')}`))
       if (m.ask) {
         meta.append(el('span', 'tag q', '❓ question'))
@@ -594,13 +652,17 @@ time { margin-left: auto; font-size: 11.5px; color: var(--faint); font-variant-n
     return art
   }
 
+  const ROLE = /^New role for (\S+): "(.*)"$/, UNSET = /^(\S+) no longer has a role$/
+  // The denden an event of the whole channel is about, if it is about one.
+  const about = (m) => (ROLE.exec(m.text || '') || UNSET.exec(m.text || ''))?.[1]
+
   // A channel event in the page's words when it is a known one, else as denden wrote it.
   function eventText(m) {
     const joined = /^New machine in .+?: (.+) \[([0-9a-f-]+)\], invited by (.+)$/.exec(m.text || '')
     if (joined) return `💻 ${joined[1]} joined, invited by 💻 ${joined[3]}`
-    const role = /^New role for (\S+): "(.*)"$/.exec(m.text || '')
+    const role = ROLE.exec(m.text || '')
     if (role) return `🐌 ${role[1]} · new role: ${role[2]}`
-    const unset = /^(\S+) no longer has a role$/.exec(m.text || '')
+    const unset = UNSET.exec(m.text || '')
     if (unset) return `🐌 ${unset[1]} · role removed`
     return `${m.alert && !/^⚠/.test(m.text) ? '⚠️ ' : ''}${m.text}`
   }
@@ -612,11 +674,11 @@ time { margin-left: auto; font-size: 11.5px; color: var(--faint); font-variant-n
     return t
   }
 
-  // Scrolls to a question (showing every message first when the filter hides it), and marks it.
+  // Scrolls to a question (showing the whole channel first when a denden's page leaves it out), and marks it.
   function reveal(id) {
     const find = () => [...$('feed').querySelectorAll('article')].find((a) => a.dataset.id === id)
     let target = find()
-    if (!target && filter) {
+    if (!target && agent) {
       select(sel, '')
       target = find()
     }

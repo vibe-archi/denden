@@ -1297,7 +1297,8 @@ fn ui_state(st: &State, after: &HashMap<String, u64>) -> Value {
                 .values()
                 .filter(|n| n.active() && !ch.members.blocked.contains_key(&n.k))
                 .map(|n| {
-                    let mut v = json!({ "name": n.n, "machine": fp(&n.k), "app": n.app, "role": n.role, "active": n.on });
+                    // since: when the name was made, the same on every machine (the page's colours follow it).
+                    let mut v = json!({ "name": n.n, "machine": fp(&n.k), "app": n.app, "role": n.role, "active": n.on, "since": n.t });
                     if n.k == ch.me {
                         v["mine"] = json!(true);
                         v["waiting"] = json!(ch.log.unread(&n.n).iter().filter(|m| s(m, "dir") == "in").count());
