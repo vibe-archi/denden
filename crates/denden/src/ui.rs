@@ -63,7 +63,7 @@ pub enum Page {
     Join,
 }
 
-/// What the page shows: the template's CONFIG, less the language and the deadline.
+/// What the page shows: the template's CONFIG, less the deadline.
 pub struct PageConfig {
     pub page: Page,
     pub name: String,
@@ -72,17 +72,11 @@ pub struct PageConfig {
     pub expires: String,
 }
 
-/// "fr" when Accept-Language starts with fr, else "en".
-pub fn lang(accept: Option<&str>) -> &'static str {
-    if accept.unwrap_or("").trim_start().get(..2).is_some_and(|p| p.eq_ignore_ascii_case("fr")) { "fr" } else { "en" }
-}
-
-/// The template with LANG, NONCE and CONFIG filled in. CONFIG is JSON with every "<" written as
+/// The template with NONCE and CONFIG filled in. CONFIG is JSON with every "<" written as
 /// <, so no value can close its script tag.
-pub fn render_page(cfg: &PageConfig, lang: &str, nonce: &str, deadline_ms: u64) -> String {
+pub fn render_page(cfg: &PageConfig, nonce: &str, deadline_ms: u64) -> String {
     let config = serde_json::json!({
         "page": if cfg.page == Page::Invite { "invite" } else { "join" },
-        "lang": lang,
         "name": cfg.name,
         "label": cfg.label,
         "expires": cfg.expires,
@@ -90,7 +84,7 @@ pub fn render_page(cfg: &PageConfig, lang: &str, nonce: &str, deadline_ms: u64) 
     })
     .to_string()
     .replace('<', "\\u003c");
-    TEMPLATE.replacen("{{LANG}}", lang, 1).replacen("{{NONCE}}", nonce, 1).replacen("{{CONFIG}}", &config, 1)
+    TEMPLATE.replacen("{{NONCE}}", nonce, 1).replacen("{{CONFIG}}", &config, 1)
 }
 
 /// What the page's API call answers: a JSON reply and, once the page has done its job, the value
@@ -160,7 +154,7 @@ pub fn serve_page<T>(cfg: &PageConfig, mut api: impl FnMut(&serde_json::Value) -
             error(&mut stream, 403, "forbidden");
         } else if req.path == path {
             if req.method == "GET" {
-                let html = render_page(cfg, lang(req.header("accept-language")), &nonce, deadline_ms);
+                let html = render_page(cfg, &nonce, deadline_ms);
                 send(&mut stream, 200, "text/html; charset=utf-8", html.as_bytes(), Some(&csp));
             } else {
                 error(&mut stream, 405, "method not allowed");
@@ -348,7 +342,7 @@ mod tests {
     #[test]
     fn page_renders_without_stray_text() {
         let cfg = PageConfig { page: Page::Invite, name: String::new(), label: "test-chan".into(), expires: "15:40".into() };
-        let html = render_page(&cfg, "en", "nonce123", 0);
+        let html = render_page(&cfg, "nonce123", 0);
         // The header comment stays a comment: nothing but markup before <html>.
         let head = &html[..html.find("<html").expect("an html element")];
         let outside = head.replace("<!doctype html>", "");

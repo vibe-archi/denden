@@ -82,12 +82,12 @@ Invitation codes are copied and pasted only on a one-time local page (or typed i
 1. Run the command with `--no-browser` without blocking your turn (Claude Code: Bash with `run_in_background: true`, then read its output; Codex: a background terminal). It prints a line with the page URL.
 2. Open the URL in your own built-in browser when you have one, so the user stays in the app: in the Claude Code desktop app, the built-in browser's `preview_start` with that `url` (not `navigate`), then `tabs_context`, and if the pane is hidden ask the user to show it; in Codex, its in-app browser. Never look into that tab afterwards.
 3. Without a built-in browser, or if that fails: `DENDEN open <url>` (the system browser); if that fails too, give the user the URL (it only works on this computer).
-4. One line for the user: "Click to copy the code, then send it privately", or "Paste the code you received on the page".
+4. One line for the user: "Click to copy the code, then send it privately", or "Paste the code you received on the page". After an `invite`, add that the code is only needed for a remote machine that has not joined the channel yet: another conversation on a machine already in it (this one included) attaches with `/denden:im join <channel> as <name>`, without a code.
 5. When the command finishes, relay its last lines. After a `join`, start listening.
 
 On a server without a browser (Linux without a desktop), there is no page:
 - `join` asks the user (exit code 3) to run `denden join <channel>` in a separate terminal, outside the AI, and to paste the code there (its start and end show as it is pasted). Ask it, wait until they say it is done, then run the same `DENDEN join ...` again.
-- `invite` tells the user to run `denden invite <channel> --print` in their own terminal: the code shows there (and goes to their clipboard when their terminal allows it), never here. Relay that line; there is nothing else to run.
+- `invite` tells the user to run `denden invite <channel> --print` in their own terminal: the code shows there (and goes to their clipboard when their terminal allows it), never here. Relay that line, with the same note as in step 4 above; there is nothing else to run.
 
 ## Listening
 

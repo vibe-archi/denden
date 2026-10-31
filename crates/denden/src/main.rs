@@ -871,6 +871,7 @@ fn cmd_invite(pos: &[String], opts: &Opts) {
             println!("Also sent to your clipboard through this terminal, if it allows it.");
         }
         println!("Send it privately, never in an AI conversation. On the new machine, in a terminal: denden join {label}");
+        println!("An invitation code is only needed for a remote computer that has not joined {label} yet.");
         return;
     }
     // The page never holds the code: its copy button asks for it once (POST <page>/api/reveal).

@@ -111,6 +111,8 @@ On any machine already admitted:
 
 > 🐌» (( Invitation opened in your browser · click to copy the code · single use, valid 30 min ))
 
+The AI adds that the code is only needed for a remote machine that has not joined the channel yet: another conversation on a machine already in it attaches with `join`, without a code. The page says it too, at the bottom (and so does `invite --print`).
+
 Once the code is copied:
 
 > 🐌» (( Invitation for vibedoc-chan copied · single use, valid until 18:42 ))
@@ -552,7 +554,7 @@ Validated during the agent-im trials, and kept as they were:
 ## 13. Points settled during implementation
 
 The open points of the discussion, and what was chosen (details in [architecture.md](architecture.md)):
-1. **Language of the fixed texts**: English. The AI relays these lines in the user's language, keeping the `> 🐌» (( … ))` shape. The local pages follow the browser's language (English or French).
+1. **Language of the fixed texts**: English. The AI relays these lines in the user's language, keeping the `> 🐌» (( … ))` shape. The local pages are in English only, like the dashboard (53).
 2. **Outputs on several lines** (`who`, late messages, several commands in a row): one block under one snail, `> 🐌» ((` … `> ))`; `who` puts its table in it.
 3. **Internal commands**, used by the AI and the hooks, not shown to the user: `inbox`, `watch` (`--once` for silent mode), `reply <id> <text>`, `hook-prompt`, `hook-stop`, `mcp`, `stop`. A reply is attached to its question through the `#id` shown with the question.
 4. **New machine notice**: it goes to every conversation attached to the channel, on the machines that see the newcomer arrive, without waking them.
@@ -607,7 +609,7 @@ When a decision is up to the user, the CLI does not wait for input: it prints th
 | 40 | Servers without a browser: the pasted code shows its ends, `invite` points to `denden invite --print` in the user's terminal (code also sent to the clipboard), `join` shows its progress, `denden link` makes the short command |
 | 41 | The dashboard (`ui`), read only at first: local page, new address per opening that lives with its tab (12 h at most), full message text, never shown to the AI, English only |
 | 42 | Later in the dashboard: actions with confirmation, among them deleting a denden or a channel from this machine |
-| 43 | An invitation lasts 30 min by default, or the time asked (`invite for 2h`), 24 h at most; the invite and join pages stay as they are |
+| 43 | An invitation lasts 30 min by default, or the time asked (`invite for 2h`), 24 h at most; the invite and join pages stay as they are (one note added: 52) |
 | 44 | The dashboard follows the real hierarchy: channels with this machine's denden on the left, messages in the middle, who is here by machine on the right; denden names first everywhere, emoji markers, one vocabulary for states (the left changed: 49) |
 | 45 | `ui` shows a link to reopen the dashboard, without a key: only the browser that opened it can use it (cookie, 12 h) |
 | 46 | The dashboard has a light and dark theme switch, and message blocks alternate two shades, each with a title bar |
@@ -616,3 +618,5 @@ When a decision is up to the user, the CLI does not wait for input: it prints th
 | 49 | Each thing in one place on the dashboard: the channels alone on the left, every denden only on the right; a click on a denden opens its page in the middle (its card, then what it sent and received) rather than filtering the channel |
 | 50 | The dashboard is flat and square: no rounded boxes, no frames inside the columns, few borders; shades of background and colour set things apart |
 | 51 | Each denden has one of ten pastel colours on the dashboard, in the order the channel got them (the eleventh takes the first again), for its name, its messages and its page |
+| 52 | An invitation says it is only needed for a remote machine not yet in the channel: the AI says so after `invite`, the invite page shows it at the bottom, and `invite --print` too |
+| 53 | The invite and join pages are in English only, like the dashboard: no French version, whatever the browser's language |
