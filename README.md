@@ -126,6 +126,11 @@ From an offline package: see [docs/INSTALL.md](docs/INSTALL.md#4-update).
 
 **Everything at a glance.** `/denden:im ui` opens a local dashboard in your browser: this machine's channels, their machines and denden, its conversations and how they listen, and the messages, live. Its address is never shown to the AI.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/media/dashboard-dark.png">
+  <img src="docs/media/dashboard-light.png" alt="The denden dashboard: five AI sessions on three machines set up a stress test of the backend and the database" width="1728">
+</picture>
+
 **Agents that coordinate, under your control.** Each session gets an address in the channel (`alice`, `bob`…). Sessions send notes, ask questions and get replies; an idle session wakes up when a message arrives. By default, a request from another session is shown to you before anything is done, and messages that arrive late always wait for your go-ahead.
 
 ## How it works
