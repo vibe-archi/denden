@@ -423,6 +423,7 @@ A local shortcut for a frequent subgroup (`servers = api, stress, db`) may come 
 - **One daemon per machine**, which runs all its channels and all its denden.
 - **It runs as long as at least one conversation of the machine is attached**, or an invitation from this machine is waiting to be used, or a dashboard is open. With none of them, it stops by itself after 10 minutes with nothing to do. Names stay bound: they are entries in each member's records, not processes.
 - **A machine without a daemon receives nothing**: messages sent to it wait at the sender, and leave when both machines are online at the same time.
+- **A machine shown online answers**: the daemons check, every few seconds, that each connection still carries messages both ways, and close one that stopped (no answer for 30 s). The machine then shows offline until the connection is made again, by itself, and what waited for it leaves then. None of this reaches the conversations (54).
 - **`keepalive on`** keeps the daemon running all the time, for a server that must receive at any moment. Messages then wait on the server for the next conversation that takes the denden.
 
 ## 9. Security
@@ -560,7 +561,7 @@ The open points of the discussion, and what was chosen (details in [architecture
 4. **New machine notice**: it goes to every conversation attached to the channel, on the machines that see the newcomer arrive, without waking them.
 5. **Sensitive commands**: `join`, `detach`, `delete`, `leave`, `wakes` and `keepalive` were added (see 7.4).
 6. **The invitation page after the copy**: it shows the next step, then closes after 60 seconds. The join page does the same after a successful join.
-7. **Protocol version**: 3. The derivation labels do not change; the exchanges do.
+7. **Protocol version**: 3. The derivation labels do not change; the exchanges do. The heartbeat (54) is announced in `hello` rather than by a new version, so that older daemons keep talking with newer ones.
 8. **`DENDEN_AS`**: removed. A conversation is identified by its session: `--session ${CLAUDE_SESSION_ID}` for Claude, `CODEX_THREAD_ID` for Codex.
 9. **Conversation titles**: found for Codex (its session index); a Claude conversation is described by its application, folder and last activity.
 10. **Wake-ups on a server without a desktop**: they work with Claude Code and Codex on the command line, in tmux; tested on a Linux server.
@@ -620,3 +621,4 @@ When a decision is up to the user, the CLI does not wait for input: it prints th
 | 51 | Each denden has one of ten pastel colours on the dashboard, in the order the channel got them (the eleventh takes the first again), for its name, its messages and its page |
 | 52 | An invitation says it is only needed for a remote machine not yet in the channel: the AI says so after `invite`, the invite page shows it at the bottom, and `invite --print` too |
 | 53 | The invite and join pages are in English only, like the dashboard: no French version, whatever the browser's language |
+| 54 | A machine shown online answers: a heartbeat between daemons (a ping every 10 s, the connection closed after 30 s without an answer, then made again by itself), never stored, shown or waking anyone, only with daemons that announce it; rather than a skill rule that restarts the daemon |

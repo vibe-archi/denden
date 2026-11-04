@@ -4,10 +4,12 @@
 // Inside each Noise-encrypted stream, newline-delimited JSON frames (protocol 3):
 //   {t:'auth', v:3, proof}    proof = HMAC(channel auth key, 'auth' | my transport key | theirs);
 //                             nothing else is sent until the other side's proof checks out.
-//   {t:'hello', machine, key, sig, chain?, inv?, needCert?, names, members}
+//   {t:'hello', machine, key, sig, chain?, inv?, needCert?, hb?, names, members}
+//                             hb: this daemon answers pings.
 //   {t:'cert', chain}         a member hands a certificate to the machine it just admitted.
 //   {t:'names', names}        name certificates: new, changed, deleted, released.
 //   {t:'msg', id, from, to, text, ts, ask?, re?, waited}, {t:'ack', id}, {t:'nack', id, error}
+//   {t:'ping'}, {t:'pong'}    the heartbeat, with a machine whose hello says hb (see PING_EVERY).
 //   {t:'error', error}        the connection is refused.
 
 use std::sync::Arc;
@@ -27,6 +29,34 @@ const RATE_PER_MIN: f64 = 20.0;
 const FRAME_LIMIT: u32 = 300; // frames per connection per 10 seconds
 const MAX_LINE: usize = 256 * 1024;
 const MAX_GOSSIP: usize = 500;
+
+/// The heartbeat: a ping this often to a machine whose hello says it answers (hb), and its
+/// connection closed when no pong came for ANSWER_WITHIN. The machine then goes offline, and the
+/// swarm dials it again. The transport keepalive only shows that the network takes our bytes: a
+/// connection whose other daemon no longer reads or answers stayed online for good. An older
+/// daemon gets no ping, and drops the frames it does not know.
+const PING_EVERY: Duration = Duration::from_secs(10);
+const ANSWER_WITHIN: u64 = 30_000;
+
+#[derive(Debug, PartialEq)]
+enum Beat {
+    Idle,
+    Ping,
+    Close,
+}
+
+/// What the heartbeat does on a tick: nothing before the machine's hello (the admission deadline
+/// covers that) or for a daemon that does not answer pings; otherwise a ping, or the end of a
+/// connection that last answered at `answered` (or brought its hello then) too long ago.
+fn beat(admitted: bool, hb: bool, answered: u64, now: u64) -> Beat {
+    if !admitted || !hb {
+        Beat::Idle
+    } else if now.saturating_sub(answered) > ANSWER_WITHIN {
+        Beat::Close
+    } else {
+        Beat::Ping
+    }
+}
 
 static GENERATION: AtomicU64 = AtomicU64::new(1);
 
@@ -110,7 +140,7 @@ fn send_hello(st: &mut State, conn: u64) {
         .map(|(k, m)| json!({ "n": m.name, "k": k, "c": m.chain }))
         .collect();
     let names: Vec<Value> = ch.names.map.values().take(MAX_GOSSIP).map(NameCert::to_json).collect();
-    let mut hello = json!({ "t": "hello", "machine": machine, "key": ch.me, "sig": b64u(&sig), "names": names, "members": members });
+    let mut hello = json!({ "t": "hello", "machine": machine, "key": ch.me, "sig": b64u(&sig), "hb": true, "names": names, "members": members });
     let chain = ch.chain();
     if !chain.is_empty() {
         hello["chain"] = Value::Array(chain);
@@ -207,6 +237,7 @@ fn on_hello(st: &mut State, conn: u64, f: &Value, fx: &mut Vec<Effect>) {
     let (mut shown, mut hello_at) = (Vec::new(), 0);
     if let Some(l) = st.live.get_mut(&conn) {
         l.key = Some(key.clone());
+        (l.hb, l.answered) = (truthy(f.get("hb")), now);
         (shown, hello_at) = (std::mem::take(&mut l.shown), l.hello_at);
     }
     let c = &st.chans[&cid];
@@ -513,6 +544,12 @@ fn on_frame(st: &mut State, conn: u64, f: &Value, fx: &mut Vec<Effect>) {
         "nack" => on_ack(st, &cid, &key, f, false),
         "cert" => on_cert(st, conn, &key, f, fx),
         "names" => on_names(st, &cid, conn, f.get("names")),
+        "ping" => send_to(st, conn, &json!({ "t": "pong" })),
+        "pong" => {
+            if let Some(l) = st.live.get_mut(&conn) {
+                l.answered = now_ms();
+            }
+        }
         _ => {}
     }
 }
@@ -558,7 +595,7 @@ async fn on_connection(shared: Shared, cid: String, conn: SwarmConnection, epoch
         let auth = st.chans[&cid].ch.keys.auth;
         st.live.insert(
             id,
-            Live { cid: cid.clone(), key: None, send: tx.clone(), kill: killer.clone(), epoch, local_t, remote_t, authed: false, window_start: now_ms(), frame_count: 0, shown: Vec::new(), hello_at: 0 },
+            Live { cid: cid.clone(), key: None, send: tx.clone(), kill: killer.clone(), epoch, local_t, remote_t, authed: false, window_start: now_ms(), frame_count: 0, shown: Vec::new(), hello_at: 0, hb: false, answered: 0 },
         );
         let proof = b64u(&hmac(&auth, &frame(&[b"auth", &local_t, &remote_t])));
         send_to(&st, id, &json!({ "t": "auth", "v": PROTO_VERSION, "proof": proof }));
@@ -568,6 +605,9 @@ async fn on_connection(shared: Shared, cid: String, conn: SwarmConnection, epoch
 
     let admit_deadline = tokio::time::sleep(Duration::from_secs(20));
     tokio::pin!(admit_deadline);
+    let mut heartbeat = tokio::time::interval(PING_EVERY);
+    heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    heartbeat.tick().await;
     let mut admitted = false;
     let mut buf: Vec<u8> = Vec::new();
     loop {
@@ -618,6 +658,20 @@ async fn on_connection(shared: Shared, cid: String, conn: SwarmConnection, epoch
                     break;
                 }
             }
+            _ = heartbeat.tick() => {
+                let st = shared.lock().unwrap();
+                let Some(l) = st.live.get(&id) else { break };
+                match beat(l.key.is_some(), l.hb, l.answered, now_ms()) {
+                    Beat::Idle => {}
+                    Beat::Ping => send_to(&st, id, &json!({ "t": "ping" })),
+                    Beat::Close => {
+                        if let (Some(c), Some(k)) = (st.chans.get(&cid), l.key.as_deref()) {
+                            log!("{}: no answer from {} for {} s: connection closed", c.ch.label(), c.ch.members.display(k), ANSWER_WITHIN / 1000);
+                        }
+                        break;
+                    }
+                }
+            }
             _ = killer.notified() => break,
             _ = &mut admit_deadline, if !admitted => break,
         }
@@ -648,7 +702,11 @@ async fn on_connection(shared: Shared, cid: String, conn: SwarmConnection, epoch
             }
         }
     }
-    let _ = tokio::time::timeout(Duration::from_secs(2), writer).await;
+    // A writer stuck on a write the other side never takes would hold the stream: stop it.
+    let stop_writer = writer.abort_handle();
+    if tokio::time::timeout(Duration::from_secs(2), writer).await.is_err() {
+        stop_writer.abort();
+    }
     drop(rd);
 }
 
@@ -777,5 +835,25 @@ async fn start_swarm(shared: Shared, cid: String, e: u64, generation: u64, seed:
             }
         }
         Err(err) => log!("{label}: epoch {e}: announce failed: {err}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_heartbeat_closes_a_connection_that_stopped_answering() {
+        assert_eq!(beat(false, true, 0, ANSWER_WITHIN * 10), Beat::Idle, "no hello yet: the admission deadline covers it");
+        assert_eq!(beat(true, false, 0, ANSWER_WITHIN * 10), Beat::Idle, "an older daemon, which does not answer pings");
+        assert_eq!(beat(true, true, 1000, 1000), Beat::Ping);
+        assert_eq!(beat(true, true, 1000, 1000 + ANSWER_WITHIN), Beat::Ping);
+        assert_eq!(beat(true, true, 1000, 1000 + ANSWER_WITHIN + 1), Beat::Close);
+        assert_eq!(beat(true, true, 5000, 1000), Beat::Ping, "a clock set back closes nothing");
+    }
+
+    #[test]
+    fn the_heartbeat_gives_several_pings_a_chance() {
+        assert!(ANSWER_WITHIN >= 3 * PING_EVERY.as_millis() as u64, "one late pong must not close a connection");
     }
 }

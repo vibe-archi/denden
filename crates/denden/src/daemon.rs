@@ -67,6 +67,10 @@ pub struct Live {
     /// was shown, kept once its hello tells us who it is.
     pub shown: Vec<(String, String)>,
     pub hello_at: u64,
+    /// The machine's daemon answers pings (its hello said hb), and when it last did (or when its
+    /// hello came): the heartbeat in net.rs.
+    pub hb: bool,
+    pub answered: u64,
 }
 
 pub struct SwarmSlot {

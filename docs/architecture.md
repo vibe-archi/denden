@@ -45,11 +45,12 @@ Inside each Noise-encrypted stream, JSON frames separated by newlines:
 | frame | role |
 |---|---|
 | `{t:'auth', v:3, proof}` | proof of knowledge of the secret, before any other exchange (unchanged) |
-| `{t:'hello', machine, key, sig, chain?, inv?, needCert?, names, members?}` | the machine introduces itself; `names` carries the name certificates it knows |
+| `{t:'hello', machine, key, sig, chain?, inv?, needCert?, hb?, names, members?}` | the machine introduces itself; `names` carries the name certificates it knows; `hb`: its daemon answers pings |
 | `{t:'cert', chain}` | a member hands a membership certificate to the machine it just admitted |
 | `{t:'names', names}` | new names, deletions, releases after a conflict |
 | `{t:'msg', id, from, to, text, ts, ask?, re?, waited}` | a message; `to` is a list of denden or `"all"` |
 | `{t:'ack', id}` / `{t:'nack', id, error}` | acknowledgement, or refusal |
+| `{t:'ping'}` / `{t:'pong'}` | the heartbeat, with a machine whose `hello` says `hb` (see 4) |
 | `{t:'error', error}` | refusal of the connection |
 
 **Membership.** A machine is admitted with a single-use invitation token, then receives a certificate signed by the machine that invited it. The others accept it if the certificate chain goes back to a key they know. Certificates name machine keys: two machines may carry the same name.
@@ -70,6 +71,7 @@ Inside each Noise-encrypted stream, JSON frames separated by newlines:
 
 - **One daemon per machine**, a local HTTP API protected by a token (`x-denden-token`, from `daemon.json`), one swarm connection per channel and per epoch, as in agent-im. A command from a newer build restarts a daemon from an older one.
 - **Routing**: a send is split per receiving machine. Each part waits in `outbox.json` until it is acknowledged, and it is sent again at each reconnection. After 7 days it is dropped, and the sending denden gets a notice. A send to `all` reports how many denden it reached.
+- **Heartbeat**: a machine is online while a connection to it is open, and a connection used to close only on an error. The transport keepalive (an empty write every 5 s) only shows that the network takes the bytes, so a connection whose other daemon no longer read or answered stayed online for good: its messages waited, unacknowledged, until a daemon was restarted. Now each daemon pings, every 10 s, a machine whose `hello` says `hb`, and closes the connection when no `pong` came for 30 s (or since its `hello`). The machine then goes offline; the swarm dials it again (after about 1 s, then 5 s, 15 s, and every 10 min while it fails), and the new connection sends again what was not acknowledged (the receiver drops what it already has). Pings and pongs are never stored or shown, and wake nobody. An older daemon, whose `hello` has no `hb`, gets no ping, and drops the frames it does not know: no new protocol version.
 - **Reading**: each denden has its own read state. A message is handed to a conversation by Claude's listener, by Codex's hooks, or by `inbox`.
 - **Listening in Claude**: by default in silent mode, `watch --once` run as a background command. It prints nothing until messages arrive, gathers what comes within 1.5 s, prints it with a last line for the agent, and ends: the end of a background command wakes the conversation, which starts the listener again. It held 33 idle minutes in a test, longer than a Monitor lasts. The fallback is a Monitor on `watch --timeout 1790`, started again at each expiry. (Codex has no such wake-up: the end of a background terminal does not start a turn, so Codex keeps its queued notices.)
 - **Pause**: a paused conversation gets no listener (a running `watch` gets a last notice and ends; a new one ends at once), no queued Codex notice and no Stop-hook handover. Its messages wait for the user's next prompt (the prompt hook) or for `resume`. Attaching a conversation again resumes it.
