@@ -424,6 +424,7 @@ A local shortcut for a frequent subgroup (`servers = api, stress, db`) may come 
 - **It runs as long as at least one conversation of the machine is attached**, or an invitation from this machine is waiting to be used, or a dashboard is open. With none of them, it stops by itself after 10 minutes with nothing to do. Names stay bound: they are entries in each member's records, not processes.
 - **A machine without a daemon receives nothing**: messages sent to it wait at the sender, and leave when both machines are online at the same time.
 - **A machine shown online answers**: the daemons check, every few seconds, that each connection still carries messages both ways, and close one that stopped (no answer for 30 s). The machine then shows offline until the connection is made again, by itself, and what waited for it leaves then. None of this reaches the conversations (54).
+- **A machine that went offline is looked for again**: at once, then at least every minute. A machine that has reached none of the others of a channel for 3 minutes starts its network again for that channel, as restarting the daemon would, and then every 10 minutes at most while it stays alone. The conversations see nothing of it (55).
 - **`keepalive on`** keeps the daemon running all the time, for a server that must receive at any moment. Messages then wait on the server for the next conversation that takes the denden.
 
 ## 9. Security
@@ -622,3 +623,4 @@ When a decision is up to the user, the CLI does not wait for input: it prints th
 | 52 | An invitation says it is only needed for a remote machine not yet in the channel: the AI says so after `invite`, the invite page shows it at the bottom, and `invite --print` too |
 | 53 | The invite and join pages are in English only, like the dashboard: no French version, whatever the browser's language |
 | 54 | A machine shown online answers: a heartbeat between daemons (a ping every 10 s, the connection closed after 30 s without an answer, then made again by itself), never stored, shown or waking anyone, only with daemons that announce it; rather than a skill rule that restarts the daemon |
+| 55 | A machine that went offline is found again without restarting the daemon: it is dialled at least every minute (not every 10), and a channel that has reached none of its other machines for 3 minutes starts its network again, then every 10 minutes at most while it stays alone; never while a machine is connected, and the conversations see nothing of it |
