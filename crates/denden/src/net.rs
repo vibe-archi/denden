@@ -58,6 +58,25 @@ fn beat(admitted: bool, hb: bool, answered: u64, now: u64) -> Beat {
     }
 }
 
+/// A machine that cannot be reached is dialled again at least this often. Hyperswarm waits about
+/// 10 minutes after three failed attempts: a network cut of a few minutes left two machines
+/// offline for each other long after it was over.
+const RETRY_WITHIN: Duration = Duration::from_secs(60);
+
+/// A channel that has reached none of its other machines for RESTART_AFTER gets its swarms
+/// started again (a new DHT node, socket and announce: what restarting the daemon did), and again
+/// every RESTART_EVERY while it stays alone. The dials of a swarm in a bad state (after a sleep or
+/// a change of network) fail the same way for good. Only when no machine is connected: there is
+/// then no connection to lose, and no conversation sees anything of it.
+const RESTART_AFTER: u64 = 3 * 60 * 1000;
+const RESTART_EVERY: u64 = 10 * 60 * 1000;
+
+/// Whether a channel with `others` other machines, `connected` of them now and none since
+/// `reached`, starts its swarms again; `restarted`: when it last did (0: never).
+fn restart_due(others: usize, connected: usize, reached: u64, restarted: u64, now: u64) -> bool {
+    others > 0 && connected == 0 && now.saturating_sub(reached) >= RESTART_AFTER && now.saturating_sub(restarted) >= RESTART_EVERY
+}
+
 static GENERATION: AtomicU64 = AtomicU64::new(1);
 
 pub fn grace_ms() -> u64 {
@@ -587,6 +606,17 @@ async fn on_connection(shared: Shared, cid: String, conn: SwarmConnection, epoch
         }
         let _ = wr.shutdown().await;
     });
+    // The reads have their own task. A read is not cancel-safe: dropped half-way, as `select!`
+    // does when another branch wins (the heartbeat, every 10 s), it loses the bytes it had taken
+    // (a frame comes as a length, then a body) and the stream cannot be read any more.
+    let (frames_tx, mut frames) = mpsc::channel::<Vec<u8>>(16);
+    let reader = tokio::spawn(async move {
+        while let Ok(Some(data)) = rd.read().await {
+            if frames_tx.send(data).await.is_err() {
+                break;
+            }
+        }
+    });
 
     let id = {
         let mut st = shared.lock().unwrap();
@@ -612,11 +642,8 @@ async fn on_connection(shared: Shared, cid: String, conn: SwarmConnection, epoch
     let mut buf: Vec<u8> = Vec::new();
     loop {
         tokio::select! {
-            r = rd.read() => {
-                let data = match r {
-                    Ok(Some(d)) => d,
-                    _ => break,
-                };
+            r = frames.recv() => {
+                let Some(data) = r else { break };
                 buf.extend_from_slice(&data);
                 if buf.len() > MAX_LINE {
                     break;
@@ -691,6 +718,7 @@ async fn on_connection(shared: Shared, cid: String, conn: SwarmConnection, epoch
                         }
                         None => {
                             c.peers.remove(&key);
+                            c.reached = now_ms();
                             if let Some(m) = c.ch.members.machines.get_mut(&key) {
                                 m.seen = now_ms();
                             }
@@ -707,7 +735,7 @@ async fn on_connection(shared: Shared, cid: String, conn: SwarmConnection, epoch
     if tokio::time::timeout(Duration::from_secs(2), writer).await.is_err() {
         stop_writer.abort();
     }
-    drop(rd);
+    reader.abort();
 }
 
 // ---------- discovery: one swarm per channel and epoch, overlapping around the change ----------
@@ -769,11 +797,61 @@ fn slot_is(st: &State, cid: &str, e: u64, generation: u64) -> bool {
     st.chans.get(cid).and_then(|c| c.swarms.get(&e)).is_some_and(|s| s.generation == generation)
 }
 
+/// Starts again the swarms of the channels that have been alone for too long (see RESTART_AFTER).
+/// Only the daemon's log says so.
+pub fn restart_lonely(shared: &Shared) {
+    let now = now_ms();
+    let mut old = Vec::new();
+    {
+        let mut st = shared.lock().unwrap();
+        if st.stopping {
+            return;
+        }
+        for (cid, c) in st.chans.iter_mut() {
+            let members = &c.ch.members;
+            let others = members.machines.keys().filter(|k| **k != c.ch.me && !members.blocked.contains_key(*k)).count();
+            if !c.peers.is_empty() || others == 0 {
+                c.reached = now;
+            }
+            if !c.ch.is_member() || !restart_due(others, c.peers.len(), c.reached, c.restarted, now) {
+                continue;
+            }
+            log!("{}: no machine reached for {} min: network started again", c.ch.label(), now.saturating_sub(c.reached) / 60_000);
+            c.restarted = now;
+            for (e, slot) in c.swarms.iter_mut() {
+                // A new generation: what the old swarm still has under way (its start, its
+                // look-ups) lets go, and reconcile leaves the slot alone until it is free.
+                slot.generation = GENERATION.fetch_add(1, Ordering::Relaxed);
+                old.push((cid.clone(), *e, slot.generation, slot.handle.take()));
+            }
+        }
+    }
+    if old.is_empty() {
+        return;
+    }
+    let shared = shared.clone();
+    tokio::spawn(async move {
+        for h in old.iter().filter_map(|(_, _, _, h)| h.as_ref()) {
+            let _ = tokio::time::timeout(Duration::from_secs(3), h.destroy()).await;
+        }
+        {
+            let mut st = shared.lock().unwrap();
+            for (cid, e, generation, _) in &old {
+                if slot_is(&st, cid, *e, *generation) {
+                    st.chans.get_mut(cid).unwrap().swarms.remove(e);
+                }
+            }
+        }
+        reconcile(&shared);
+    });
+}
+
 async fn start_swarm(shared: Shared, cid: String, e: u64, generation: u64, seed: String, topic: [u8; 32]) {
     let kp = KeyPair::from_seed(transport_seed(&seed, e));
     let local_t = kp.public_key;
     let mut config = SwarmConfig::with_public_bootstrap();
     config.key_pair = Some(kp);
+    config.max_retry_delay = Some(RETRY_WITHIN);
     let label = shared.lock().unwrap().chans.get(&cid).map(|c| c.ch.label()).unwrap_or_default();
     let (_task, handle, mut conn_rx) = match spawn(config).await {
         Ok(s) => s,
@@ -841,6 +919,28 @@ async fn start_swarm(shared: Shared, cid: String, e: u64, generation: u64, seed:
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_channel_alone_for_too_long_starts_its_swarms_again() {
+        let t = 1_000_000_000;
+        assert!(!restart_due(2, 0, t, 0, t + RESTART_AFTER - 1), "not yet");
+        assert!(restart_due(2, 0, t, 0, t + RESTART_AFTER));
+        assert!(!restart_due(2, 1, t, 0, t + RESTART_AFTER * 10), "a machine is connected: the network works");
+        assert!(!restart_due(0, 0, t, 0, t + RESTART_AFTER * 10), "nobody to reach");
+        assert!(!restart_due(2, 0, t, 0, t - 5000), "a clock set back");
+    }
+
+    #[test]
+    fn a_restart_that_brought_nobody_back_waits_before_the_next() {
+        let t = 1_000_000_000;
+        let first = t + RESTART_AFTER;
+        assert!(!restart_due(1, 0, t, first, first + RESTART_EVERY - 1));
+        assert!(restart_due(1, 0, t, first, first + RESTART_EVERY));
+        // A machine came back and left: alone again since `later`, but the last restart still counts.
+        let later = first + 60_000;
+        assert!(!restart_due(1, 0, later, first, later + RESTART_AFTER), "less than RESTART_EVERY since the last one");
+        assert!(restart_due(1, 0, later, first, first + RESTART_EVERY));
+    }
 
     #[test]
     fn the_heartbeat_closes_a_connection_that_stopped_answering() {

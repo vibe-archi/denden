@@ -85,6 +85,10 @@ pub struct Chan {
     pub announced: bool,
     /// Machines online: key -> connection.
     pub peers: HashMap<String, u64>,
+    /// When one of the other machines was last connected (or there was none to reach), and when
+    /// the swarms were last started again for want of any: the restart in net.rs.
+    pub reached: u64,
+    pub restarted: u64,
     pub banned_t: HashSet<String>,
     /// Transport keys that refused us (not admitted yet), per epoch: dialled again once we are.
     pub refused_by: HashMap<String, u64>,
@@ -683,7 +687,7 @@ fn start_channel(shared: &Shared, ch: Channel) {
     let cid = ch.cid.clone();
     {
         let mut st = shared.lock().unwrap();
-        st.chans.insert(cid.clone(), Chan { ch, swarms: BTreeMap::new(), announced: false, peers: HashMap::new(), banned_t: HashSet::new(), refused_by: HashMap::new(), buckets: HashMap::new(), last_refusal: None, claims: Claims::default() });
+        st.chans.insert(cid.clone(), Chan { ch, swarms: BTreeMap::new(), announced: false, peers: HashMap::new(), reached: now_ms(), restarted: 0, banned_t: HashSet::new(), refused_by: HashMap::new(), buckets: HashMap::new(), last_refusal: None, claims: Claims::default() });
     }
     net::reconcile(shared);
 }
@@ -1692,6 +1696,7 @@ pub fn run() -> Result<(), String> {
                 loop {
                     tick.tick().await;
                     net::reconcile(&sh);
+                    net::restart_lonely(&sh);
                 }
             });
         }

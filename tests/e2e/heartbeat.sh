@@ -61,7 +61,7 @@ step "both idle for 45 s: the pongs keep the connection open"
 sleep 45
 out=$(api_state); echo "$out"
 expect "api still online" "online" "$out"
-if grep -q "no answer" "$A/daemon.log" "$B/daemon.log"; then echo "   FAIL: a live connection was closed"; fails=$((fails + 1)); else echo "   ok: nothing closed"; fi
+if grep -q "no answer\|offline:" "$A/daemon.log" "$B/daemon.log"; then echo "   FAIL: a live connection was closed"; fails=$((fails + 1)); else echo "   ok: nothing closed"; fi
 
 step "server: the daemon freezes"
 pid=$(sed -n 's/.*"pid": *\([0-9]*\).*/\1/p' "$B/daemon.json")
